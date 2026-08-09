@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { chatGPTSignInPath, chatGPTSignOutPath } from "./chatgpt-auth";
+import { signOutOfSprintia } from "./actions";
 import { getAppUser } from "./lib/auth";
 import { SignInPage } from "./SignInPage";
 import { SprintiaApp } from "./SprintiaApp";
@@ -11,20 +11,32 @@ export const metadata: Metadata = {
   description: "Organiza sprints, tareas y el progreso de tu equipo en un tablero Scrum simple y colaborativo.",
 };
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ join?: string }> }) {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ join?: string; error?: string }>;
+}) {
   const params = await searchParams;
-  const joinCode = typeof params.join === "string" ? params.join.slice(0, 20) : undefined;
+  const joinCode = typeof params.join === "string" && /^[A-Z0-9]{8,20}$/i.test(params.join)
+    ? params.join.toUpperCase()
+    : undefined;
+  const authError = typeof params.error === "string";
+  const isConfigured = [
+    process.env.AUTH_SECRET,
+    process.env.AUTH_GOOGLE_ID,
+    process.env.AUTH_GOOGLE_SECRET,
+    process.env.MONGODB_URI,
+  ].every((value) => Boolean(value?.trim()));
   const user = await getAppUser();
 
   if (!user) {
-    const returnTo = joinCode ? `/?join=${encodeURIComponent(joinCode)}` : "/";
-    return <SignInPage signInPath={chatGPTSignInPath(returnTo)} />;
+    return <SignInPage joinCode={joinCode} authError={authError} isConfigured={isConfigured} />;
   }
 
   return (
     <SprintiaApp
       user={user}
-      signOutPath={chatGPTSignOutPath("/")}
+      signOutAction={signOutOfSprintia}
       initialJoinCode={joinCode}
     />
   );

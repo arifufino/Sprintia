@@ -18,8 +18,47 @@ import type {
   TaskStatus,
 } from "./lib/types";
 
-type View = "board" | "backlog" | "summary" | "team";
+type View = "board" | "backlog" | "summary" | "team" | "settings";
 type Modal = "task" | "invite" | "workspace" | "sprint" | null;
+type ThemePreference = "light" | "dark" | "system";
+type TextSizePreference = "small" | "medium" | "large" | "xlarge";
+
+const THEME_STORAGE_KEY = "sprintia-theme";
+const TEXT_SIZE_STORAGE_KEY = "sprintia-text-size";
+
+const isThemePreference = (value: string | null): value is ThemePreference =>
+  value === "light" || value === "dark" || value === "system";
+
+const isTextSizePreference = (value: string | null): value is TextSizePreference =>
+  value === "small" || value === "medium" || value === "large" || value === "xlarge";
+
+function initialThemePreference(): ThemePreference {
+  if (typeof document === "undefined") return "system";
+  const value = document.documentElement.dataset.themePreference ?? null;
+  return isThemePreference(value) ? value : "system";
+}
+
+function initialTextSizePreference(): TextSizePreference {
+  if (typeof document === "undefined") return "medium";
+  const value = document.documentElement.dataset.textSize ?? null;
+  return isTextSizePreference(value) ? value : "medium";
+}
+
+function applyThemePreference(preference: ThemePreference) {
+  const resolved = preference === "system"
+    ? window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+    : preference;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themePreference = preference;
+  document.documentElement.style.colorScheme = resolved;
+
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  themeColor?.setAttribute("content", resolved === "dark" ? "#101520" : "#f5f6f8");
+}
+
+function applyTextSizePreference(preference: TextSizePreference) {
+  document.documentElement.dataset.textSize = preference;
+}
 
 const statusMeta: Array<{
   id: Exclude<TaskStatus, "backlog">;
@@ -52,6 +91,7 @@ const viewTitles: Record<View, { eyebrow: string; title: string }> = {
   backlog: { eyebrow: "Próximamente", title: "Backlog" },
   summary: { eyebrow: "Estado del proyecto", title: "Resumen" },
   team: { eyebrow: "Personas y carga", title: "Equipo" },
+  settings: { eyebrow: "Tu experiencia", title: "Configuración" },
 };
 
 const APP_NOW = new Date().getTime();
@@ -148,11 +188,11 @@ function LoadingScreen({ user }: { user: AppUser }) {
 
 export function SprintiaApp({
   user,
-  signOutPath,
+  signOutAction,
   initialJoinCode,
 }: {
   user: AppUser;
-  signOutPath: string;
+  signOutAction: () => Promise<void>;
   initialJoinCode?: string;
 }) {
   const [data, setData] = useState<BootstrapData | null>(null);
@@ -167,7 +207,61 @@ export function SprintiaApp({
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [themePreference, setThemePreference] = useState<ThemePreference>(initialThemePreference);
+  const [textSizePreference, setTextSizePreference] = useState<TextSizePreference>(initialTextSizePreference);
   const joinedFromLink = useRef(false);
+
+  useEffect(() => {
+    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncSystemTheme = () => {
+      let current: string | null = null;
+      try {
+        current = window.localStorage.getItem(THEME_STORAGE_KEY);
+      } catch {
+        current = document.documentElement.dataset.themePreference ?? "system";
+      }
+      if (!isThemePreference(current) || current === "system") applyThemePreference("system");
+    };
+    const syncStoredPreferences = (event: StorageEvent) => {
+      if (event.key === THEME_STORAGE_KEY) {
+        const nextTheme = isThemePreference(event.newValue) ? event.newValue : "system";
+        setThemePreference(nextTheme);
+        applyThemePreference(nextTheme);
+      }
+      if (event.key === TEXT_SIZE_STORAGE_KEY) {
+        const nextTextSize = isTextSizePreference(event.newValue) ? event.newValue : "medium";
+        setTextSizePreference(nextTextSize);
+        applyTextSizePreference(nextTextSize);
+      }
+    };
+
+    colorScheme.addEventListener("change", syncSystemTheme);
+    window.addEventListener("storage", syncStoredPreferences);
+    return () => {
+      colorScheme.removeEventListener("change", syncSystemTheme);
+      window.removeEventListener("storage", syncStoredPreferences);
+    };
+  }, []);
+
+  const changeThemePreference = (preference: ThemePreference) => {
+    setThemePreference(preference);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, preference);
+    } catch {
+      // Keep the preference active for this session if storage is blocked.
+    }
+    applyThemePreference(preference);
+  };
+
+  const changeTextSizePreference = (preference: TextSizePreference) => {
+    setTextSizePreference(preference);
+    try {
+      window.localStorage.setItem(TEXT_SIZE_STORAGE_KEY, preference);
+    } catch {
+      // Keep the preference active for this session if storage is blocked.
+    }
+    applyTextSizePreference(preference);
+  };
 
   const load = useCallback(async (workspaceId?: string, quiet = false) => {
     if (!quiet) setError("");
@@ -340,6 +434,7 @@ export function SprintiaApp({
             ["backlog", "≡", "Backlog"],
             ["summary", "↗", "Resumen"],
             ["team", "◉", "Equipo"],
+            ["settings", "⚙", "Configuración"],
           ] as Array<[View, string, string]>).map(([id, icon, label]) => (
             <button
               key={id}
@@ -362,7 +457,9 @@ export function SprintiaApp({
         <div className="sidebar-footer">
           <Avatar member={{ name: user.name, avatarColor: data.members.find((member) => member.id === user.id)?.avatarColor ?? "#6757d9" }} />
           <span><strong>{user.name}</strong><small>{data.workspace.role === "owner" ? "Propietario" : "Miembro"}</small></span>
-          <a href={signOutPath} aria-label="Cerrar sesión" title="Cerrar sesión">↪</a>
+          <form action={signOutAction}>
+            <button className="sidebar-signout" type="submit" aria-label="Cerrar sesión" title="Cerrar sesión">↪</button>
+          </form>
         </div>
       </aside>
 
@@ -370,10 +467,12 @@ export function SprintiaApp({
         <header className="topbar">
           <button className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú">☰</button>
           <div className="page-heading"><span>{pageTitle.eyebrow}</span><h1>{pageTitle.title}</h1></div>
-          <div className="topbar-actions">
-            <button className="secondary-button hide-mobile" onClick={() => setModal("invite")}>Invitar</button>
-            <button className="primary-button" onClick={() => openNewTask(view === "backlog" ? "backlog" : "todo")}><span>+</span> Nueva tarea</button>
-          </div>
+          {view !== "settings" && (
+            <div className="topbar-actions">
+              <button className="secondary-button hide-mobile" onClick={() => setModal("invite")}>Invitar</button>
+              <button className="primary-button" onClick={() => openNewTask(view === "backlog" ? "backlog" : "todo")}><span>+</span> Nueva tarea</button>
+            </div>
+          )}
         </header>
 
         {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>Cerrar</button></div>}
@@ -432,6 +531,14 @@ export function SprintiaApp({
             onInvite={() => setModal("invite")}
           />
         )}
+        {view === "settings" && (
+          <SettingsView
+            themePreference={themePreference}
+            textSizePreference={textSizePreference}
+            onThemeChange={changeThemePreference}
+            onTextSizeChange={changeTextSizePreference}
+          />
+        )}
       </main>
 
       <nav className="mobile-nav" aria-label="Navegación móvil">
@@ -440,8 +547,9 @@ export function SprintiaApp({
           ["backlog", "≡", "Backlog"],
           ["summary", "↗", "Resumen"],
           ["team", "◉", "Equipo"],
+          ["settings", "⚙", "Ajustes"],
         ] as Array<[View, string, string]>).map(([id, icon, label]) => (
-          <button key={id} className={view === id ? "nav-active" : ""} onClick={() => setView(id)}><span>{icon}</span>{label}</button>
+          <button key={id} className={view === id ? "nav-active" : ""} onClick={() => setView(id)}><span aria-hidden="true">{icon}</span>{label}</button>
         ))}
       </nav>
 
@@ -759,6 +867,115 @@ function TeamView({ members, tasks, inviteCode, onInvite }: { members: Member[];
   );
 }
 
+function SettingsView({
+  themePreference,
+  textSizePreference,
+  onThemeChange,
+  onTextSizeChange,
+}: {
+  themePreference: ThemePreference;
+  textSizePreference: TextSizePreference;
+  onThemeChange: (preference: ThemePreference) => void;
+  onTextSizeChange: (preference: TextSizePreference) => void;
+}) {
+  const themeOptions: Array<{ id: ThemePreference; icon: string; label: string; detail: string }> = [
+    { id: "light", icon: "☀", label: "Claro", detail: "Fondo luminoso y limpio" },
+    { id: "dark", icon: "◐", label: "Oscuro", detail: "Menos brillo en la pantalla" },
+    { id: "system", icon: "◑", label: "Sistema", detail: "Sigue tu dispositivo" },
+  ];
+  const textSizeOptions: Array<{ id: TextSizePreference; label: string; detail: string; sample: string }> = [
+    { id: "small", label: "Pequeño", detail: "Más contenido visible", sample: "Aa" },
+    { id: "medium", label: "Medio", detail: "Tamaño recomendado", sample: "Aa" },
+    { id: "large", label: "Grande", detail: "Lectura más cómoda", sample: "Aa" },
+    { id: "xlarge", label: "Muy grande", detail: "Máxima legibilidad", sample: "Aa" },
+  ];
+
+  return (
+    <div className="content-pad content-narrow settings-page">
+      <section className="section-intro settings-intro">
+        <div>
+          <span className="section-kicker">Preferencias personales</span>
+          <h2>Haz que Sprintia se sienta tuyo</h2>
+          <p>Estos cambios se guardan únicamente en este dispositivo y no afectan al resto del equipo.</p>
+        </div>
+        <span className="local-preference-pill"><span aria-hidden="true">✓</span> Guardado automático</span>
+      </section>
+
+      <div className="settings-grid">
+        <section className="settings-card" aria-labelledby="theme-settings-title">
+          <div className="settings-card-heading">
+            <span className="settings-card-icon" aria-hidden="true">◒</span>
+            <div><h3 id="theme-settings-title">Apariencia</h3><p>Elige cómo se muestran fondos, tarjetas y controles.</p></div>
+          </div>
+          <fieldset className="preference-fieldset">
+            <legend>Tema de color</legend>
+            <div className="preference-options preference-options-theme">
+              {themeOptions.map((option) => (
+                <label className="preference-option" key={option.id}>
+                  <input
+                    type="radio"
+                    name="theme-preference"
+                    value={option.id}
+                    checked={themePreference === option.id}
+                    onChange={() => onThemeChange(option.id)}
+                  />
+                  <span className="preference-option-body">
+                    <span className={`preference-sample theme-sample theme-sample-${option.id}`} aria-hidden="true">{option.icon}</span>
+                    <span className="preference-copy"><strong>{option.label}</strong><small>{option.detail}</small></span>
+                    <span className="preference-check" aria-hidden="true">✓</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </section>
+
+        <section className="settings-card" aria-labelledby="text-settings-title">
+          <div className="settings-card-heading">
+            <span className="settings-card-icon" aria-hidden="true">Aa</span>
+            <div><h3 id="text-settings-title">Tamaño de texto</h3><p>Ajusta la escala para leer y trabajar con comodidad.</p></div>
+          </div>
+          <fieldset className="preference-fieldset">
+            <legend>Escala de lectura</legend>
+            <div className="preference-options preference-options-size">
+              {textSizeOptions.map((option) => (
+                <label className="preference-option" key={option.id}>
+                  <input
+                    type="radio"
+                    name="text-size-preference"
+                    value={option.id}
+                    checked={textSizePreference === option.id}
+                    onChange={() => onTextSizeChange(option.id)}
+                  />
+                  <span className="preference-option-body">
+                    <span className={`preference-sample text-sample text-sample-${option.id}`} aria-hidden="true">{option.sample}</span>
+                    <span className="preference-copy"><strong>{option.label}</strong><small>{option.detail}</small></span>
+                    <span className="preference-check" aria-hidden="true">✓</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </section>
+      </div>
+
+      <section className="settings-preview" aria-labelledby="settings-preview-title">
+        <div className="settings-preview-copy">
+          <span className="section-kicker">Vista previa</span>
+          <h3 id="settings-preview-title">Así se verá tu tablero</h3>
+          <p>La preferencia se aplica al instante en todas las vistas de Sprintia.</p>
+        </div>
+        <article className="settings-preview-task">
+          <div><span>UNI-24</span><span className="priority priority-medium">Media</span></div>
+          <strong>Preparar la presentación del sprint</strong>
+          <p>Revisar avances y organizar los entregables con el equipo.</p>
+          <footer><span>5 puntos</span><span className="preview-avatar-mini" aria-hidden="true">AM</span></footer>
+        </article>
+      </section>
+    </div>
+  );
+}
+
 function TaskModal({ task, members, sprints, busy, onClose, onSave, onDelete }: {
   task: ScrumTask;
   members: Member[];
@@ -777,11 +994,11 @@ function TaskModal({ task, members, sprints, busy, onClose, onSave, onDelete }: 
       <form className="task-form" onSubmit={submit}>
         <label className="field field-full"><span>Título</span><input autoFocus value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Ej. Preparar encuesta para usuarios" maxLength={160} required /></label>
         <label className="field field-full"><span>Descripción</span><textarea value={form.description} onChange={(event) => update("description", event.target.value)} placeholder="Añade el contexto y los criterios para considerarla terminada…" rows={5} maxLength={1200} /></label>
-        <label className="field"><span>Estado</span><select value={form.status} onChange={(event) => update("status", event.target.value as TaskStatus)}><option value="backlog">Backlog</option>{statusMeta.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}</select></label>
+        <label className="field"><span>Estado</span><select value={form.status} onChange={(event) => { const status = event.target.value as TaskStatus; setForm((current) => ({ ...current, status, sprintId: status === "backlog" ? null : current.sprintId })); }}><option value="backlog">Backlog</option>{statusMeta.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}</select></label>
         <label className="field"><span>Prioridad</span><select value={form.priority} onChange={(event) => update("priority", event.target.value as TaskPriority)}><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></label>
         <label className="field"><span>Puntos</span><select value={form.points} onChange={(event) => update("points", Number(event.target.value))}>{[1, 2, 3, 5, 8, 13].map((point) => <option key={point} value={point}>{point} {point === 1 ? "punto" : "puntos"}</option>)}</select></label>
         <label className="field"><span>Responsable</span><select value={form.assigneeId ?? ""} onChange={(event) => update("assigneeId", event.target.value || null)}><option value="">Sin asignar</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-        <label className="field field-full"><span>Sprint</span><select value={form.sprintId ?? ""} onChange={(event) => { update("sprintId", event.target.value || null); if (!event.target.value) update("status", "backlog"); }}><option value="">Backlog del producto</option>{sprints.map((sprint) => <option key={sprint.id} value={sprint.id}>{sprint.name} · {sprint.status === "active" ? "Activo" : sprint.status === "planned" ? "Planeado" : "Finalizado"}</option>)}</select></label>
+        <label className="field field-full"><span>Sprint</span><select value={form.sprintId ?? ""} onChange={(event) => { const sprintId = event.target.value || null; setForm((current) => ({ ...current, sprintId, status: sprintId ? (current.status === "backlog" ? "todo" : current.status) : "backlog" })); }}><option value="">Backlog del producto</option>{sprints.map((sprint) => <option key={sprint.id} value={sprint.id}>{sprint.name} · {sprint.status === "active" ? "Activo" : sprint.status === "planned" ? "Planeado" : "Finalizado"}</option>)}</select></label>
         <div className="modal-actions field-full">
           {onDelete && (confirmDelete ? <span className="delete-confirm">¿Eliminar? <button type="button" onClick={() => void onDelete()} disabled={busy}>Sí, eliminar</button><button type="button" onClick={() => setConfirmDelete(false)}>No</button></span> : <button className="danger-link" type="button" onClick={() => setConfirmDelete(true)}>Eliminar tarea</button>)}
           <span className="modal-action-spacer" />
@@ -799,7 +1016,7 @@ function InviteModal({ workspaceName, inviteCode, onClose }: { workspaceName: st
   const copy = async (value: string) => { await navigator.clipboard.writeText(value); setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
   return (
     <ModalShell title="Invitar al equipo" subtitle={`Comparte el acceso a “${workspaceName}”.`} onClose={onClose}>
-      <div className="invite-modal-body"><div className="invite-note"><span>i</span><p>Cualquier persona con una cuenta de ChatGPT y este enlace podrá unirse como miembro.</p></div><label className="field"><span>Código de invitación</span><div className="copy-field"><code>{inviteCode}</code><button onClick={() => void copy(inviteCode)}>{copied ? "Copiado" : "Copiar"}</button></div></label><label className="field"><span>Enlace directo</span><div className="copy-field copy-link"><input readOnly value={link} /><button onClick={() => void copy(link)}>{copied ? "Copiado" : "Copiar"}</button></div></label><div className="modal-actions"><span className="modal-action-spacer" /><button className="primary-button" onClick={onClose}>Listo</button></div></div>
+      <div className="invite-modal-body"><div className="invite-note"><span>i</span><p>Cualquier persona con una cuenta de Google y este enlace podrá unirse como miembro.</p></div><label className="field"><span>Código de invitación</span><div className="copy-field"><code>{inviteCode}</code><button type="button" onClick={() => void copy(inviteCode)}>{copied ? "Copiado" : "Copiar"}</button></div></label><label className="field"><span>Enlace directo</span><div className="copy-field copy-link"><input readOnly value={link} /><button type="button" onClick={() => void copy(link)}>{copied ? "Copiado" : "Copiar"}</button></div></label><div className="modal-actions"><span className="modal-action-spacer" /><button className="primary-button" type="button" onClick={onClose}>Listo</button></div></div>
     </ModalShell>
   );
 }
@@ -810,7 +1027,7 @@ function WorkspaceModal({ busy, onClose, onSubmit }: { busy: boolean; onClose: (
   return (
     <ModalShell title="Otro proyecto" subtitle="Crea un espacio nuevo o únete al tablero de tu equipo." onClose={onClose}>
       <div className="segmented"><button className={mode === "create" ? "active" : ""} onClick={() => { setMode("create"); setValue(""); }}>Crear proyecto</button><button className={mode === "join" ? "active" : ""} onClick={() => { setMode("join"); setValue(""); }}>Unirme con código</button></div>
-      <form className="simple-form" onSubmit={(event) => { event.preventDefault(); void onSubmit(mode, value); }}><label className="field"><span>{mode === "create" ? "Nombre del proyecto" : "Código de invitación"}</span><input autoFocus value={value} onChange={(event) => setValue(event.target.value)} placeholder={mode === "create" ? "Ej. Aplicación de tutorías" : "Ej. A1B2C3D"} maxLength={80} required /></label><div className="modal-actions"><span className="modal-action-spacer" /><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={busy || !value.trim()}>{busy ? "Guardando…" : mode === "create" ? "Crear proyecto" : "Unirme"}</button></div></form>
+      <form className="simple-form" onSubmit={(event) => { event.preventDefault(); void onSubmit(mode, value); }}><label className="field"><span>{mode === "create" ? "Nombre del proyecto" : "Código de invitación"}</span><input autoFocus value={value} onChange={(event) => setValue(event.target.value)} placeholder={mode === "create" ? "Ej. Aplicación de tutorías" : "Ej. A1B2C3D4"} maxLength={mode === "create" ? 80 : 20} pattern={mode === "join" ? "[A-Za-z0-9]{8,20}" : undefined} required /></label><div className="modal-actions"><span className="modal-action-spacer" /><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={busy || !value.trim()}>{busy ? "Guardando…" : mode === "create" ? "Crear proyecto" : "Unirme"}</button></div></form>
     </ModalShell>
   );
 }

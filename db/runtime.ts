@@ -1,4 +1,6 @@
-import { env } from "cloudflare:workers";
+import type { Collection, Db } from "mongodb";
+import { appDatabase } from "../lib/mongodb";
+import { UserFacingError } from "../lib/errors";
 import type {
   Activity,
   AppUser,
@@ -11,101 +13,122 @@ import type {
   Workspace,
 } from "../app/lib/types";
 
-type D1Statement = {
-  bind: (...values: unknown[]) => D1Statement;
-  first: <T = Record<string, unknown>>() => Promise<T | null>;
-  all: <T = Record<string, unknown>>() => Promise<{ results: T[] }>;
-  run: () => Promise<unknown>;
+type MemberRole = "owner" | "member";
+type SprintStatus = "active" | "planned" | "completed";
+
+type ProfileDocument = {
+  _id: string;
+  authUserId: string;
+  email: string;
+  name: string;
+  avatarColor: string;
+  createdAt: string;
 };
 
-type D1DatabaseLike = {
-  prepare: (query: string) => D1Statement;
-  batch: (statements: D1Statement[]) => Promise<unknown[]>;
+type WorkspaceDocument = {
+  _id: string;
+  name: string;
+  inviteCode: string;
+  createdBy: string;
+  createdAt: string;
 };
 
-const schemaStatements = [
-  `CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT NOT NULL,
-    name TEXT NOT NULL,
-    avatar_color TEXT NOT NULL DEFAULT '#6757d9',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`,
-  `CREATE TABLE IF NOT EXISTS workspaces (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    invite_code TEXT NOT NULL UNIQUE,
-    created_by TEXT NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`,
-  `CREATE TABLE IF NOT EXISTS members (
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL DEFAULT 'member',
-    joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (workspace_id, user_id)
-  )`,
-  `CREATE TABLE IF NOT EXISTS sprints (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    goal TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'active',
-    start_date TEXT NOT NULL,
-    end_date TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`,
-  `CREATE TABLE IF NOT EXISTS tasks (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    sprint_id TEXT REFERENCES sprints(id) ON DELETE SET NULL,
-    code TEXT NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'todo',
-    priority TEXT NOT NULL DEFAULT 'medium',
-    points INTEGER NOT NULL DEFAULT 3,
-    assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-    reporter_id TEXT NOT NULL REFERENCES users(id),
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`,
-  `CREATE TABLE IF NOT EXISTS activities (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES users(id),
-    message TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`,
-  "CREATE UNIQUE INDEX IF NOT EXISTS workspaces_invite_code_idx ON workspaces(invite_code)",
-  "CREATE INDEX IF NOT EXISTS members_user_idx ON members(user_id)",
-  "CREATE INDEX IF NOT EXISTS sprints_workspace_idx ON sprints(workspace_id)",
-  "CREATE INDEX IF NOT EXISTS tasks_workspace_idx ON tasks(workspace_id)",
-  "CREATE INDEX IF NOT EXISTS tasks_sprint_status_idx ON tasks(sprint_id, status)",
-  "CREATE INDEX IF NOT EXISTS activities_workspace_idx ON activities(workspace_id)",
-];
+type MembershipDocument = {
+  _id: string;
+  workspaceId: string;
+  userId: string;
+  role: MemberRole;
+  joinedAt: string;
+};
 
-let schemaPromise: Promise<void> | null = null;
+type SprintDocument = {
+  _id: string;
+  workspaceId: string;
+  name: string;
+  goal: string;
+  status: SprintStatus;
+  startDate: string;
+  endDate: string;
+  createdAt: string;
+};
 
-function database(): D1DatabaseLike {
-  const binding = env.DB as unknown as D1DatabaseLike | undefined;
-  if (!binding) throw new Error("La base de datos todavía no está disponible.");
-  return binding;
+type TaskDocument = {
+  _id: string;
+  workspaceId: string;
+  sprintId: string | null;
+  code: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  points: number;
+  assigneeId: string | null;
+  reporterId: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ActivityDocument = {
+  _id: string;
+  workspaceId: string;
+  userId: string;
+  message: string;
+  createdAt: string;
+};
+
+type CounterDocument = {
+  _id: string;
+  value: number;
+};
+
+type Collections = {
+  profiles: Collection<ProfileDocument>;
+  workspaces: Collection<WorkspaceDocument>;
+  memberships: Collection<MembershipDocument>;
+  sprints: Collection<SprintDocument>;
+  tasks: Collection<TaskDocument>;
+  activities: Collection<ActivityDocument>;
+  counters: Collection<CounterDocument>;
+};
+
+let indexesPromise: Promise<void> | null = null;
+
+function collections(db: Db): Collections {
+  return {
+    profiles: db.collection<ProfileDocument>("profiles"),
+    workspaces: db.collection<WorkspaceDocument>("workspaces"),
+    memberships: db.collection<MembershipDocument>("memberships"),
+    sprints: db.collection<SprintDocument>("sprints"),
+    tasks: db.collection<TaskDocument>("tasks"),
+    activities: db.collection<ActivityDocument>("activities"),
+    counters: db.collection<CounterDocument>("counters"),
+  };
 }
 
-async function ensureSchema() {
-  if (!schemaPromise) {
-    const db = database();
-    schemaPromise = db
-      .batch(schemaStatements.map((statement) => db.prepare(statement)))
+async function database() {
+  const db = await appDatabase();
+  if (!indexesPromise) {
+    const store = collections(db);
+    indexesPromise = Promise.all([
+      store.profiles.createIndex({ authUserId: 1 }, { unique: true }),
+      store.workspaces.createIndex({ inviteCode: 1 }, { unique: true }),
+      store.memberships.createIndex({ workspaceId: 1, userId: 1 }, { unique: true }),
+      store.memberships.createIndex({ userId: 1, joinedAt: 1 }),
+      store.sprints.createIndex({ workspaceId: 1, startDate: -1 }),
+      store.tasks.createIndex({ workspaceId: 1, code: 1 }, { unique: true }),
+      store.tasks.createIndex({ workspaceId: 1, sprintId: 1, status: 1, sortOrder: 1 }),
+      store.tasks.createIndex({ workspaceId: 1, assigneeId: 1 }),
+      store.activities.createIndex({ workspaceId: 1, createdAt: -1 }),
+    ])
       .then(() => undefined)
       .catch((error) => {
-        schemaPromise = null;
+        indexesPromise = null;
         throw error;
       });
   }
-  await schemaPromise;
+  await indexesPromise;
+  return db;
 }
 
 const colors = ["#6757d9", "#ea6d4d", "#2f9c88", "#d18a22", "#3b82c4", "#a8558c"];
@@ -121,7 +144,7 @@ function newId(prefix: string) {
 }
 
 function inviteCode() {
-  return crypto.randomUUID().replaceAll("-", "").slice(0, 7).toUpperCase();
+  return crypto.randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase();
 }
 
 function isoDay(offset = 0) {
@@ -130,36 +153,67 @@ function isoDay(offset = 0) {
   return value.toISOString().slice(0, 10);
 }
 
+function cleanText(value: unknown, max: number) {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function cleanSortOrder(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(1_000_000, Math.trunc(numeric))) : 0;
+}
+
+function cleanIsoDate(value: unknown, fallback: string) {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  const date = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new UserFacingError("Usa una fecha válida con formato AAAA-MM-DD.");
+  }
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    throw new UserFacingError("Usa una fecha válida con formato AAAA-MM-DD.");
+  }
+  return date;
+}
+
+function membershipId(workspaceId: string, userId: string) {
+  return `${workspaceId}:${userId}`;
+}
+
 export async function upsertUser(user: AppUser) {
-  await ensureSchema();
-  await database()
-    .prepare(
-      `INSERT INTO users (id, email, name, avatar_color)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET email = excluded.email, name = excluded.name`,
-    )
-    .bind(user.id, user.email, user.name, avatarColor(user.id))
-    .run();
+  const store = collections(await database());
+  const now = new Date().toISOString();
+  await store.profiles.updateOne(
+    { _id: user.id },
+    {
+      $set: { authUserId: user.id, email: user.email, name: user.name },
+      $setOnInsert: { avatarColor: avatarColor(user.id), createdAt: now },
+    },
+    { upsert: true },
+  );
 }
 
 async function membershipsFor(userId: string): Promise<Workspace[]> {
-  const result = await database()
-    .prepare(
-      `SELECT w.id, w.name, w.invite_code AS inviteCode, m.role
-       FROM members m
-       JOIN workspaces w ON w.id = m.workspace_id
-       WHERE m.user_id = ?
-       ORDER BY w.created_at ASC`,
-    )
-    .bind(userId)
-    .all<Workspace>();
-  return result.results;
+  const store = collections(await database());
+  const membershipRows = await store.memberships.find({ userId }).sort({ joinedAt: 1 }).toArray();
+  if (membershipRows.length === 0) return [];
+
+  const workspaceRows = await store.workspaces
+    .find({ _id: { $in: membershipRows.map((item) => item.workspaceId) } })
+    .toArray();
+  const workspaceMap = new Map(workspaceRows.map((item) => [item._id, item]));
+
+  return membershipRows.flatMap((membership) => {
+    const workspace = workspaceMap.get(membership.workspaceId);
+    return workspace
+      ? [{ id: workspace._id, name: workspace.name, inviteCode: workspace.inviteCode, role: membership.role }]
+      : [];
+  });
 }
 
 async function createStarterWorkspace(user: AppUser) {
-  const db = database();
-  const workspaceId = newId("ws");
-  const sprintId = newId("sp");
+  const store = collections(await database());
+  const workspaceId = `ws_starter_${user.id}`;
+  const sprintId = `sp_starter_${user.id}`;
   const now = new Date().toISOString();
   const taskSeeds: Array<[string, string, TaskStatus, TaskPriority, number]> = [
     ["Definir alcance del proyecto", "Acordar entregables y criterios de éxito con el equipo.", "done", "high", 3],
@@ -172,68 +226,77 @@ async function createStarterWorkspace(user: AppUser) {
     ["Planear pruebas con usuarios", "Definir tareas, preguntas y métricas de la prueba.", "backlog", "medium", 5],
   ];
 
-  const statements: D1Statement[] = [
-    db.prepare(
-      "INSERT INTO workspaces (id, name, invite_code, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).bind(workspaceId, "Proyecto de Universidad", inviteCode(), user.id, now),
-    db.prepare(
-      "INSERT INTO members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
-    ).bind(workspaceId, user.id, now),
-    db.prepare(
-      `INSERT INTO sprints (id, workspace_id, name, goal, status, start_date, end_date, created_at)
-       VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
-    ).bind(
-      sprintId,
-      workspaceId,
-      "Sprint 1",
-      "Validar la idea y entregar una primera versión funcional",
-      isoDay(-3),
-      isoDay(10),
-      now,
-    ),
-  ];
-
-  taskSeeds.forEach(([title, description, status, priority, points], index) => {
-    statements.push(
-      db.prepare(
-        `INSERT INTO tasks
-          (id, workspace_id, sprint_id, code, title, description, status, priority, points, assignee_id, reporter_id, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        newId("task"),
+  await store.workspaces.updateOne(
+    { _id: workspaceId },
+    { $setOnInsert: { name: "Proyecto de Universidad", inviteCode: inviteCode(), createdBy: user.id, createdAt: now } },
+    { upsert: true },
+  );
+  await store.memberships.updateOne(
+    { _id: membershipId(workspaceId, user.id) },
+    { $setOnInsert: { workspaceId, userId: user.id, role: "owner", joinedAt: now } },
+    { upsert: true },
+  );
+  await store.sprints.updateOne(
+    { _id: sprintId },
+    {
+      $setOnInsert: {
         workspaceId,
-        status === "backlog" ? null : sprintId,
-        `UNI-${String(index + 1).padStart(2, "0")}`,
-        title,
-        description,
-        status,
-        priority,
-        points,
-        status === "backlog" ? null : user.id,
-        user.id,
-        index,
-        now,
-        now,
-      ),
-    );
-  });
-
-  statements.push(
-    db.prepare(
-      "INSERT INTO activities (id, workspace_id, user_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).bind(newId("act"), workspaceId, user.id, "creó el espacio de trabajo", now),
+        name: "Sprint 1",
+        goal: "Validar la idea y entregar una primera versión funcional",
+        status: "active",
+        startDate: isoDay(-3),
+        endDate: isoDay(10),
+        createdAt: now,
+      },
+    },
+    { upsert: true },
   );
 
-  await db.batch(statements);
+  await store.tasks.bulkWrite(
+    taskSeeds.map(([title, description, status, priority, points], index) => ({
+      updateOne: {
+        filter: { _id: `task_starter_${user.id}_${index + 1}` },
+        update: {
+          $setOnInsert: {
+            workspaceId,
+            sprintId: status === "backlog" ? null : sprintId,
+            code: `UNI-${String(index + 1).padStart(2, "0")}`,
+            title,
+            description,
+            status,
+            priority,
+            points,
+            assigneeId: status === "backlog" ? null : user.id,
+            reporterId: user.id,
+            sortOrder: index,
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+        upsert: true,
+      },
+    })),
+  );
+  await store.counters.updateOne(
+    { _id: `task-code:${workspaceId}` },
+    { $max: { value: taskSeeds.length } },
+    { upsert: true },
+  );
+  await store.activities.updateOne(
+    { _id: `act_starter_${user.id}` },
+    { $setOnInsert: { workspaceId, userId: user.id, message: "creó el espacio de trabajo", createdAt: now } },
+    { upsert: true },
+  );
+
   return workspaceId;
 }
 
 export async function isMember(workspaceId: string, userId: string) {
-  await ensureSchema();
-  const row = await database()
-    .prepare("SELECT role FROM members WHERE workspace_id = ? AND user_id = ?")
-    .bind(workspaceId, userId)
-    .first<{ role: string }>();
+  const store = collections(await database());
+  const row = await store.memberships.findOne(
+    { workspaceId, userId },
+    { projection: { role: 1 } },
+  );
   return row?.role ?? null;
 }
 
@@ -246,178 +309,211 @@ export async function getBootstrap(user: AppUser, requestedWorkspace?: string | 
     workspaces = await membershipsFor(user.id);
   }
 
-  const workspace =
-    workspaces.find((item) => item.id === requestedWorkspace) ?? workspaces[0];
-  const db = database();
-
-  const [sprintRows, taskRows, memberRows, activityRows] = await Promise.all([
-    db.prepare(
-      `SELECT id, workspace_id AS workspaceId, name, goal, status,
-              start_date AS startDate, end_date AS endDate
-       FROM sprints WHERE workspace_id = ? ORDER BY start_date DESC`,
-    )
-      .bind(workspace.id)
-      .all<Sprint>(),
-    db.prepare(
-      `SELECT t.id, t.workspace_id AS workspaceId, t.sprint_id AS sprintId, t.code,
-              t.title, t.description, t.status, t.priority, t.points,
-              t.assignee_id AS assigneeId, u.name AS assigneeName,
-              u.avatar_color AS assigneeColor, t.reporter_id AS reporterId,
-              t.sort_order AS sortOrder, t.created_at AS createdAt, t.updated_at AS updatedAt
-       FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
-       WHERE t.workspace_id = ?
-       ORDER BY t.sort_order ASC, t.created_at ASC`,
-    )
-      .bind(workspace.id)
-      .all<ScrumTask>(),
-    db.prepare(
-      `SELECT u.id, u.email, u.name, u.avatar_color AS avatarColor,
-              m.role, m.joined_at AS joinedAt
-       FROM members m JOIN users u ON u.id = m.user_id
-       WHERE m.workspace_id = ? ORDER BY m.joined_at ASC`,
-    )
-      .bind(workspace.id)
-      .all<Member>(),
-    db.prepare(
-      `SELECT a.id, a.user_id AS userId, u.name AS userName,
-              u.avatar_color AS avatarColor, a.message, a.created_at AS createdAt
-       FROM activities a JOIN users u ON u.id = a.user_id
-       WHERE a.workspace_id = ? ORDER BY a.created_at DESC LIMIT 12`,
-    )
-      .bind(workspace.id)
-      .all<Activity>(),
+  const workspace = workspaces.find((item) => item.id === requestedWorkspace) ?? workspaces[0];
+  const store = collections(await database());
+  const [sprintRows, taskRows, membershipRows, activityRows] = await Promise.all([
+    store.sprints.find({ workspaceId: workspace.id }).sort({ startDate: -1 }).toArray(),
+    store.tasks.find({ workspaceId: workspace.id }).sort({ sortOrder: 1, createdAt: 1 }).toArray(),
+    store.memberships.find({ workspaceId: workspace.id }).sort({ joinedAt: 1 }).toArray(),
+    store.activities.find({ workspaceId: workspace.id }).sort({ createdAt: -1 }).limit(12).toArray(),
   ]);
 
-  return {
-    user,
-    workspace,
-    workspaces,
-    sprints: sprintRows.results,
-    tasks: taskRows.results,
-    members: memberRows.results,
-    activities: activityRows.results,
-  };
+  const profileIds = Array.from(
+    new Set([
+      ...membershipRows.map((item) => item.userId),
+      ...taskRows.flatMap((item) => (item.assigneeId ? [item.assigneeId] : [])),
+      ...activityRows.map((item) => item.userId),
+    ]),
+  );
+  const profileRows = await store.profiles.find({ _id: { $in: profileIds } }).toArray();
+  const profileMap = new Map(profileRows.map((item) => [item._id, item]));
+
+  const sprints: Sprint[] = sprintRows.map((item) => ({
+    id: item._id,
+    workspaceId: item.workspaceId,
+    name: item.name,
+    goal: item.goal,
+    status: item.status,
+    startDate: item.startDate,
+    endDate: item.endDate,
+  }));
+  const tasks: ScrumTask[] = taskRows.map((item) => {
+    const assignee = item.assigneeId ? profileMap.get(item.assigneeId) : undefined;
+    return {
+      id: item._id,
+      workspaceId: item.workspaceId,
+      sprintId: item.sprintId,
+      code: item.code,
+      title: item.title,
+      description: item.description,
+      status: item.status,
+      priority: item.priority,
+      points: item.points,
+      assigneeId: item.assigneeId,
+      assigneeName: assignee?.name ?? null,
+      assigneeColor: assignee?.avatarColor ?? null,
+      reporterId: item.reporterId,
+      sortOrder: item.sortOrder,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
+  });
+  const members: Member[] = membershipRows.flatMap((item) => {
+    const profile = profileMap.get(item.userId);
+    return profile
+      ? [{
+          id: profile._id,
+          email: profile.email,
+          name: profile.name,
+          avatarColor: profile.avatarColor,
+          role: item.role,
+          joinedAt: item.joinedAt,
+        }]
+      : [];
+  });
+  const activities: Activity[] = activityRows.flatMap((item) => {
+    const profile = profileMap.get(item.userId);
+    return profile
+      ? [{
+          id: item._id,
+          userId: item.userId,
+          userName: profile.name,
+          avatarColor: profile.avatarColor,
+          message: item.message,
+          createdAt: item.createdAt,
+        }]
+      : [];
+  });
+
+  return { user, workspace, workspaces, sprints, tasks, members, activities };
 }
 
 async function addActivity(workspaceId: string, userId: string, message: string) {
-  await database()
-    .prepare(
-      "INSERT INTO activities (id, workspace_id, user_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(newId("act"), workspaceId, userId, message, new Date().toISOString())
-    .run();
+  const store = collections(await database());
+  await store.activities.insertOne({
+    _id: newId("act"),
+    workspaceId,
+    userId,
+    message,
+    createdAt: new Date().toISOString(),
+  });
 }
 
-function cleanText(value: unknown, max: number) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
+async function nextTaskCode(workspaceId: string) {
+  const store = collections(await database());
+  const counterId = `task-code:${workspaceId}`;
+  const existingCounter = await store.counters.findOne({ _id: counterId });
+
+  if (!existingCounter) {
+    const [maximum] = await store.tasks
+      .aggregate<{ maximum: number }>([
+        { $match: { workspaceId, code: { $regex: /^UNI-[0-9]+$/ } } },
+        { $project: { number: { $toInt: { $substrBytes: ["$code", 4, 12] } } } },
+        { $group: { _id: null, maximum: { $max: "$number" } } },
+      ])
+      .toArray();
+    await store.counters.updateOne(
+      { _id: counterId },
+      { $max: { value: maximum?.maximum ?? 0 } },
+      { upsert: true },
+    );
+  }
+
+  const counter = await store.counters.findOneAndUpdate(
+    { _id: counterId },
+    { $inc: { value: 1 } },
+    { upsert: true, returnDocument: "after" },
+  );
+  if (!counter) throw new Error("No pudimos asignar un código a la tarea.");
+  return `UNI-${String(counter.value).padStart(2, "0")}`;
 }
 
 const validStatuses: TaskStatus[] = ["backlog", "todo", "progress", "review", "done"];
 const validPriorities: TaskPriority[] = ["low", "medium", "high", "urgent"];
 const validPoints = [1, 2, 3, 5, 8, 13];
 
-export async function createTask(
-  user: AppUser,
-  payload: Record<string, unknown>,
-) {
-  const workspaceId = cleanText(payload.workspaceId, 100);
-  if (!(await isMember(workspaceId, user.id))) throw new Error("No tienes acceso a este equipo.");
+async function validateAssignee(workspaceId: string, assigneeId: string | null) {
+  if (!assigneeId) return null;
+  if (!(await isMember(workspaceId, assigneeId))) {
+    throw new UserFacingError("El responsable debe pertenecer al equipo.");
+  }
+  return assigneeId;
+}
+
+export async function createTask(user: AppUser, payload: Record<string, unknown>) {
+  const workspaceId = cleanText(payload.workspaceId, 150);
+  if (!(await isMember(workspaceId, user.id))) throw new UserFacingError("No tienes acceso a este equipo.");
 
   const title = cleanText(payload.title, 160);
-  if (!title) throw new Error("Escribe un título para la tarea.");
-
-  const status = validStatuses.includes(payload.status as TaskStatus)
-    ? (payload.status as TaskStatus)
-    : "todo";
+  if (!title) throw new UserFacingError("Escribe un título para la tarea.");
+  let status = validStatuses.includes(payload.status as TaskStatus) ? (payload.status as TaskStatus) : "todo";
   const priority = validPriorities.includes(payload.priority as TaskPriority)
     ? (payload.priority as TaskPriority)
     : "medium";
   const points = validPoints.includes(Number(payload.points)) ? Number(payload.points) : 3;
-  const count = await database()
-    .prepare("SELECT COUNT(*) AS total FROM tasks WHERE workspace_id = ?")
-    .bind(workspaceId)
-    .first<{ total: number }>();
-  const code = `UNI-${String(Number(count?.total ?? 0) + 1).padStart(2, "0")}`;
-  const now = new Date().toISOString();
+  const assigneeId = await validateAssignee(workspaceId, cleanText(payload.assigneeId, 100) || null);
+  const store = collections(await database());
+  let sprintId = cleanText(payload.sprintId, 150) || null;
+  if (status === "backlog") sprintId = null;
+  else if (!sprintId) status = "backlog";
+  if (sprintId && !(await store.sprints.findOne({ _id: sprintId, workspaceId }))) {
+    throw new UserFacingError("Ese sprint no pertenece al proyecto.");
+  }
 
-  await database()
-    .prepare(
-      `INSERT INTO tasks
-       (id, workspace_id, sprint_id, code, title, description, status, priority, points, assignee_id, reporter_id, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      newId("task"),
-      workspaceId,
-      cleanText(payload.sprintId, 100) || null,
-      code,
-      title,
-      cleanText(payload.description, 1200),
-      status,
-      priority,
-      points,
-      cleanText(payload.assigneeId, 100) || null,
-      user.id,
-      Number(payload.sortOrder) || 0,
-      now,
-      now,
-    )
-    .run();
+  const code = await nextTaskCode(workspaceId);
+  const now = new Date().toISOString();
+  await store.tasks.insertOne({
+    _id: newId("task"),
+    workspaceId,
+    sprintId,
+    code,
+    title,
+    description: cleanText(payload.description, 1200),
+    status,
+    priority,
+    points,
+    assigneeId,
+    reporterId: user.id,
+    sortOrder: cleanSortOrder(payload.sortOrder),
+    createdAt: now,
+    updatedAt: now,
+  });
   await addActivity(workspaceId, user.id, `creó ${code}: ${title}`);
 }
 
 export async function updateTask(user: AppUser, payload: Record<string, unknown>) {
-  const workspaceId = cleanText(payload.workspaceId, 100);
-  if (!(await isMember(workspaceId, user.id))) throw new Error("No tienes acceso a este equipo.");
-  const id = cleanText(payload.id, 100);
-  const current = await database()
-    .prepare("SELECT * FROM tasks WHERE id = ? AND workspace_id = ?")
-    .bind(id, workspaceId)
-    .first<Record<string, unknown>>();
-  if (!current) throw new Error("No encontramos esa tarea.");
+  const workspaceId = cleanText(payload.workspaceId, 150);
+  if (!(await isMember(workspaceId, user.id))) throw new UserFacingError("No tienes acceso a este equipo.");
+  const id = cleanText(payload.id, 150);
+  const store = collections(await database());
+  const current = await store.tasks.findOne({ _id: id, workspaceId });
+  if (!current) throw new UserFacingError("No encontramos esa tarea.");
 
-  const title = payload.title === undefined ? String(current.title) : cleanText(payload.title, 160);
-  if (!title) throw new Error("La tarea necesita un título.");
-  const status = validStatuses.includes(payload.status as TaskStatus)
+  const title = payload.title === undefined ? current.title : cleanText(payload.title, 160);
+  if (!title) throw new UserFacingError("La tarea necesita un título.");
+  let status = validStatuses.includes(payload.status as TaskStatus)
     ? (payload.status as TaskStatus)
-    : (current.status as TaskStatus);
+    : current.status;
   const priority = validPriorities.includes(payload.priority as TaskPriority)
     ? (payload.priority as TaskPriority)
-    : (current.priority as TaskPriority);
-  const points = validPoints.includes(Number(payload.points))
-    ? Number(payload.points)
-    : Number(current.points);
-  const description =
-    payload.description === undefined
-      ? String(current.description ?? "")
-      : cleanText(payload.description, 1200);
-  const assigneeId =
-    payload.assigneeId === undefined
-      ? (current.assignee_id as string | null)
-      : cleanText(payload.assigneeId, 100) || null;
-  const sprintId =
-    payload.sprintId === undefined
-      ? (current.sprint_id as string | null)
-      : cleanText(payload.sprintId, 100) || null;
+    : current.priority;
+  const points = validPoints.includes(Number(payload.points)) ? Number(payload.points) : current.points;
+  const description = payload.description === undefined ? current.description : cleanText(payload.description, 1200);
+  const assigneeId = await validateAssignee(
+    workspaceId,
+    payload.assigneeId === undefined ? current.assigneeId : cleanText(payload.assigneeId, 100) || null,
+  );
+  let sprintId = payload.sprintId === undefined ? current.sprintId : cleanText(payload.sprintId, 150) || null;
+  if (status === "backlog") sprintId = null;
+  else if (!sprintId) status = "backlog";
+  if (sprintId && !(await store.sprints.findOne({ _id: sprintId, workspaceId }))) {
+    throw new UserFacingError("Ese sprint no pertenece al proyecto.");
+  }
 
-  await database()
-    .prepare(
-      `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, points = ?,
-       assignee_id = ?, sprint_id = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
-    )
-    .bind(
-      title,
-      description,
-      status,
-      priority,
-      points,
-      assigneeId,
-      sprintId,
-      new Date().toISOString(),
-      id,
-      workspaceId,
-    )
-    .run();
+  await store.tasks.updateOne(
+    { _id: id, workspaceId },
+    { $set: { title, description, status, priority, points, assigneeId, sprintId, updatedAt: new Date().toISOString() } },
+  );
 
   if (status !== current.status) {
     const statusNames: Record<TaskStatus, string> = {
@@ -427,77 +523,72 @@ export async function updateTask(user: AppUser, payload: Record<string, unknown>
       review: "En revisión",
       done: "Terminado",
     };
-    await addActivity(workspaceId, user.id, `movió ${String(current.code)} a ${statusNames[status]}`);
+    await addActivity(workspaceId, user.id, `movió ${current.code} a ${statusNames[status]}`);
   }
 }
 
 export async function deleteTask(user: AppUser, payload: Record<string, unknown>) {
-  const workspaceId = cleanText(payload.workspaceId, 100);
-  if (!(await isMember(workspaceId, user.id))) throw new Error("No tienes acceso a este equipo.");
-  const id = cleanText(payload.id, 100);
-  const task = await database()
-    .prepare("SELECT code, title FROM tasks WHERE id = ? AND workspace_id = ?")
-    .bind(id, workspaceId)
-    .first<{ code: string; title: string }>();
-  if (!task) throw new Error("No encontramos esa tarea.");
-  await database()
-    .prepare("DELETE FROM tasks WHERE id = ? AND workspace_id = ?")
-    .bind(id, workspaceId)
-    .run();
+  const workspaceId = cleanText(payload.workspaceId, 150);
+  if (!(await isMember(workspaceId, user.id))) throw new UserFacingError("No tienes acceso a este equipo.");
+  const id = cleanText(payload.id, 150);
+  const store = collections(await database());
+  const task = await store.tasks.findOne({ _id: id, workspaceId });
+  if (!task) throw new UserFacingError("No encontramos esa tarea.");
+  await store.tasks.deleteOne({ _id: id, workspaceId });
   await addActivity(workspaceId, user.id, `eliminó ${task.code}: ${task.title}`);
 }
 
 export async function createSprint(user: AppUser, payload: Record<string, unknown>) {
-  const workspaceId = cleanText(payload.workspaceId, 100);
-  if (!(await isMember(workspaceId, user.id))) throw new Error("No tienes acceso a este equipo.");
+  const workspaceId = cleanText(payload.workspaceId, 150);
+  if (!(await isMember(workspaceId, user.id))) throw new UserFacingError("No tienes acceso a este equipo.");
   const name = cleanText(payload.name, 80);
-  if (!name) throw new Error("Escribe un nombre para el sprint.");
-  const startDate = cleanText(payload.startDate, 10) || isoDay();
-  const endDate = cleanText(payload.endDate, 10) || isoDay(13);
-  if (endDate < startDate) throw new Error("La fecha final debe ser posterior a la inicial.");
-  const existing = await database()
-    .prepare("SELECT COUNT(*) AS total FROM sprints WHERE workspace_id = ?")
-    .bind(workspaceId)
-    .first<{ total: number }>();
-  const status = Number(existing?.total ?? 0) === 0 ? "active" : "planned";
-  await database()
-    .prepare(
-      `INSERT INTO sprints (id, workspace_id, name, goal, status, start_date, end_date, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      newId("sp"),
-      workspaceId,
-      name,
-      cleanText(payload.goal, 300),
-      status,
-      startDate,
-      endDate,
-      new Date().toISOString(),
-    )
-    .run();
+  if (!name) throw new UserFacingError("Escribe un nombre para el sprint.");
+  const startDate = cleanIsoDate(payload.startDate, isoDay());
+  const endDate = cleanIsoDate(payload.endDate, isoDay(13));
+  if (endDate < startDate) throw new UserFacingError("La fecha final debe ser igual o posterior a la inicial.");
+  const store = collections(await database());
+  const status: SprintStatus = (await store.sprints.countDocuments({ workspaceId })) === 0 ? "active" : "planned";
+  await store.sprints.insertOne({
+    _id: newId("sp"),
+    workspaceId,
+    name,
+    goal: cleanText(payload.goal, 300),
+    status,
+    startDate,
+    endDate,
+    createdAt: new Date().toISOString(),
+  });
   await addActivity(workspaceId, user.id, `creó ${name}`);
 }
 
 export async function createWorkspace(user: AppUser, payload: Record<string, unknown>) {
   await upsertUser(user);
   const name = cleanText(payload.name, 80);
-  if (!name) throw new Error("Escribe un nombre para el proyecto.");
+  if (!name) throw new UserFacingError("Escribe un nombre para el proyecto.");
   const workspaceId = newId("ws");
   const sprintId = newId("sp");
   const now = new Date().toISOString();
-  const db = database();
-  await db.batch([
-    db.prepare(
-      "INSERT INTO workspaces (id, name, invite_code, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).bind(workspaceId, name, inviteCode(), user.id, now),
-    db.prepare(
-      "INSERT INTO members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
-    ).bind(workspaceId, user.id, now),
-    db.prepare(
-      `INSERT INTO sprints (id, workspace_id, name, goal, status, start_date, end_date, created_at)
-       VALUES (?, ?, 'Sprint 1', 'Organizar y entregar el primer incremento', 'active', ?, ?, ?)`,
-    ).bind(sprintId, workspaceId, isoDay(), isoDay(13), now),
+  const store = collections(await database());
+  await store.workspaces.insertOne({ _id: workspaceId, name, inviteCode: inviteCode(), createdBy: user.id, createdAt: now });
+  await Promise.all([
+    store.memberships.insertOne({
+      _id: membershipId(workspaceId, user.id),
+      workspaceId,
+      userId: user.id,
+      role: "owner",
+      joinedAt: now,
+    }),
+    store.sprints.insertOne({
+      _id: sprintId,
+      workspaceId,
+      name: "Sprint 1",
+      goal: "Organizar y entregar el primer incremento",
+      status: "active",
+      startDate: isoDay(),
+      endDate: isoDay(13),
+      createdAt: now,
+    }),
+    store.counters.insertOne({ _id: `task-code:${workspaceId}`, value: 0 }),
   ]);
   await addActivity(workspaceId, user.id, "creó el espacio de trabajo");
   return workspaceId;
@@ -506,20 +597,18 @@ export async function createWorkspace(user: AppUser, payload: Record<string, unk
 export async function joinWorkspace(user: AppUser, payload: Record<string, unknown>) {
   await upsertUser(user);
   const code = cleanText(payload.inviteCode, 20).toUpperCase();
-  if (!code) throw new Error("Escribe el código de invitación.");
-  const workspace = await database()
-    .prepare("SELECT id, name FROM workspaces WHERE invite_code = ?")
-    .bind(code)
-    .first<{ id: string; name: string }>();
-  if (!workspace) throw new Error("Ese código de invitación no existe.");
-  await database()
-    .prepare(
-      `INSERT INTO members (workspace_id, user_id, role, joined_at)
-       VALUES (?, ?, 'member', ?)
-       ON CONFLICT(workspace_id, user_id) DO NOTHING`,
-    )
-    .bind(workspace.id, user.id, new Date().toISOString())
-    .run();
-  await addActivity(workspace.id, user.id, "se unió al equipo");
-  return workspace.id;
+  if (!code) throw new UserFacingError("Escribe el código de invitación.");
+  if (!/^[A-Z0-9]{8,20}$/.test(code)) {
+    throw new UserFacingError("El código de invitación no tiene un formato válido.");
+  }
+  const store = collections(await database());
+  const workspace = await store.workspaces.findOne({ inviteCode: code });
+  if (!workspace) throw new UserFacingError("Ese código de invitación no existe.");
+  const result = await store.memberships.updateOne(
+    { _id: membershipId(workspace._id, user.id) },
+    { $setOnInsert: { workspaceId: workspace._id, userId: user.id, role: "member", joinedAt: new Date().toISOString() } },
+    { upsert: true },
+  );
+  if (result.upsertedCount > 0) await addActivity(workspace._id, user.id, "se unió al equipo");
+  return workspace._id;
 }

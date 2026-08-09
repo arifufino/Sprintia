@@ -16,7 +16,10 @@ export async function GET(request: Request) {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No pudimos cargar el proyecto.";
-    return Response.json({ error: message }, { status: 500 });
+    console.error("No pudimos cargar el proyecto.", error);
+    return Response.json(
+      { error: "No pudimos cargar el proyecto. Inténtalo de nuevo." },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    );
   }
 }
