@@ -22,9 +22,18 @@ type View = "board" | "backlog" | "summary" | "team" | "settings";
 type Modal = "task" | "invite" | "workspace" | "sprint" | null;
 type ThemePreference = "light" | "dark" | "system";
 type TextSizePreference = "small" | "medium" | "large" | "xlarge";
+type AssistantAction = {
+  type: "createSprint" | "createTask" | "selectSprint";
+  label: string;
+  payload: Record<string, unknown>;
+};
+type AssistantMessage = { role: "assistant" | "user"; content: string; action?: AssistantAction };
+type MutationResult = { ok?: boolean; error?: string; workspaceId?: string; sprintId?: string };
 
 const THEME_STORAGE_KEY = "sprintia-theme";
 const TEXT_SIZE_STORAGE_KEY = "sprintia-text-size";
+const SIDEBAR_WIDTH_STORAGE_KEY = "sprintia-sidebar-width";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "sprintia-sidebar-collapsed";
 
 const isThemePreference = (value: string | null): value is ThemePreference =>
   value === "light" || value === "dark" || value === "system";
@@ -33,15 +42,15 @@ const isTextSizePreference = (value: string | null): value is TextSizePreference
   value === "small" || value === "medium" || value === "large" || value === "xlarge";
 
 function initialThemePreference(): ThemePreference {
-  if (typeof document === "undefined") return "system";
+  if (typeof document === "undefined") return "dark";
   const value = document.documentElement.dataset.themePreference ?? null;
-  return isThemePreference(value) ? value : "system";
+  return isThemePreference(value) ? value : "dark";
 }
 
 function initialTextSizePreference(): TextSizePreference {
-  if (typeof document === "undefined") return "medium";
+  if (typeof document === "undefined") return "large";
   const value = document.documentElement.dataset.textSize ?? null;
-  return isTextSizePreference(value) ? value : "medium";
+  return isTextSizePreference(value) ? value : "large";
 }
 
 function applyThemePreference(preference: ThemePreference) {
@@ -58,6 +67,17 @@ function applyThemePreference(preference: ThemePreference) {
 
 function applyTextSizePreference(preference: TextSizePreference) {
   document.documentElement.dataset.textSize = preference;
+}
+
+function initialSidebarWidth() {
+  if (typeof window === "undefined") return 248;
+  const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+  return Number.isFinite(saved) ? Math.min(360, Math.max(220, saved)) : 248;
+}
+
+function initialSidebarCollapsed() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
 }
 
 const statusMeta: Array<{
@@ -137,6 +157,59 @@ function EmptyState({ title, body, action }: { title: string; body: string; acti
   );
 }
 
+function AssistantPanel({
+  messages,
+  input,
+  busy,
+  closing,
+  onInput,
+  onSubmit,
+  onPrompt,
+  onAction,
+  onClose,
+}: {
+  messages: AssistantMessage[];
+  input: string;
+  busy: boolean;
+  closing: boolean;
+  onInput: (value: string) => void;
+  onSubmit: () => void;
+  onPrompt: (value: string) => void;
+  onAction: (action: AssistantAction) => void;
+  onClose: () => void;
+}) {
+  const prompts = ["¿Qué hago después?", "Dame un resumen", "Ayúdame a priorizar"];
+
+  return (
+    <aside className={`assistant-panel${closing ? " assistant-panel-closing" : ""}`} role="dialog" aria-modal="false" aria-labelledby="assistant-title">
+      <header className="assistant-header">
+        <div className="assistant-heading">
+          <span className="assistant-orb" aria-hidden="true">✦</span>
+          <div><strong id="assistant-title">Sprintia Copiloto</strong><small>Tu contexto, en una conversación</small></div>
+        </div>
+        <button className="assistant-close" onClick={onClose} aria-label="Cerrar copiloto">×</button>
+      </header>
+      <div className="assistant-messages" aria-live="polite">
+        {messages.map((message, index) => (
+          <div className={`assistant-message assistant-message-${message.role}`} key={`${message.role}-${index}`}>
+            {message.role === "assistant" && <span className="assistant-message-mark" aria-hidden="true">✦</span>}
+            <div className="assistant-message-body"><p>{message.content}</p>{message.action && <button className="assistant-action" type="button" onClick={() => onAction(message.action!)} disabled={busy}>Ejecutar · {message.action.label}</button>}</div>
+          </div>
+        ))}
+        {busy && <div className="assistant-message assistant-message-assistant assistant-message-typing"><span className="assistant-message-mark" aria-hidden="true">✦</span><p><i /><i /><i /></p></div>}
+      </div>
+      <div className="assistant-prompts" aria-label="Sugerencias del copiloto">
+        {prompts.map((prompt) => <button key={prompt} type="button" onClick={() => onPrompt(prompt)} disabled={busy}>{prompt}</button>)}
+      </div>
+      <form className="assistant-form" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); onSubmit(); }}>
+        <textarea value={input} onChange={(event) => onInput(event.target.value)} placeholder="Escribe un comando o pregunta…" aria-label="Mensaje para Sprintia Copiloto" rows={1} maxLength={1200} />
+        <button type="submit" disabled={busy || !input.trim()} aria-label="Enviar mensaje">↑</button>
+      </form>
+      <small className="assistant-disclaimer">Sugerencias para organizarte. Tú decides qué cambia en el tablero.</small>
+    </aside>
+  );
+}
+
 function ModalShell({ title, subtitle, onClose, children, wide = false }: {
   title: string;
   subtitle?: string;
@@ -144,14 +217,21 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const [closing, setClosing] = useState(false);
+  const close = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(onClose, 240);
+  }, [closing, onClose]);
+
   useEffect(() => {
-    const close = (event: KeyboardEvent) => event.key === "Escape" && onClose();
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [onClose]);
+    const closeOnEscape = (event: KeyboardEvent) => event.key === "Escape" && close();
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [close]);
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className={`modal-backdrop${closing ? " modal-closing" : ""}`} role="presentation" onMouseDown={close}>
       <section
         className={`modal-card${wide ? " modal-wide" : ""}`}
         role="dialog"
@@ -164,7 +244,7 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
             <h2 id="modal-title">{title}</h2>
             {subtitle && <p>{subtitle}</p>}
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Cerrar ventana">×</button>
+          <button className="icon-button" onClick={close} aria-label="Cerrar ventana">×</button>
         </div>
         {children}
       </section>
@@ -197,6 +277,9 @@ export function SprintiaApp({
 }) {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [view, setView] = useState<View>("board");
+  const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [selectedTask, setSelectedTask] = useState<ScrumTask | null>(null);
   const [selectedSprintId, setSelectedSprintId] = useState("");
@@ -209,7 +292,19 @@ export function SprintiaApp({
   const [mobileMenu, setMobileMenu] = useState(false);
   const [themePreference, setThemePreference] = useState<ThemePreference>(initialThemePreference);
   const [textSizePreference, setTextSizePreference] = useState<TextSizePreference>(initialTextSizePreference);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantClosing, setAssistantClosing] = useState(false);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
+    { role: "assistant", content: "Hola, soy tu copiloto de sprint. Puedo ayudarte a priorizar tareas, resumir el avance o preparar un plan." },
+  ]);
   const joinedFromLink = useRef(false);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarWidth, sidebarCollapsed]);
 
   useEffect(() => {
     const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
@@ -229,7 +324,7 @@ export function SprintiaApp({
         applyThemePreference(nextTheme);
       }
       if (event.key === TEXT_SIZE_STORAGE_KEY) {
-        const nextTextSize = isTextSizePreference(event.newValue) ? event.newValue : "medium";
+        const nextTextSize = isTextSizePreference(event.newValue) ? event.newValue : "large";
         setTextSizePreference(nextTextSize);
         applyTextSizePreference(nextTextSize);
       }
@@ -311,12 +406,12 @@ export function SprintiaApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const result = (await response.json()) as { ok?: boolean; error?: string; workspaceId?: string };
+      const result = (await response.json()) as MutationResult;
       if (!response.ok) throw new Error(result.error ?? "No pudimos guardar el cambio.");
       const nextWorkspace = options?.switchTo ?? result.workspaceId ?? data?.workspace.id;
       await load(nextWorkspace);
       setToast(successMessage);
-      return true;
+      return result;
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : "No pudimos guardar el cambio.");
       return false;
@@ -364,6 +459,11 @@ export function SprintiaApp({
     );
   }
 
+  const navigateToView = (nextView: View) => {
+    setView(nextView);
+    setMobileMenu(false);
+  };
+
   const openNewTask = (status: TaskStatus = "todo") => {
     setSelectedTask({
       id: "",
@@ -409,13 +509,114 @@ export function SprintiaApp({
   const donePoints = sprintTasks.filter((task) => task.status === "done").reduce((sum, task) => sum + task.points, 0);
   const progress = totalPoints ? Math.round((donePoints / totalPoints) * 100) : 0;
 
+  const askAssistant = async (value = assistantInput) => {
+    const message = value.trim();
+    if (!message || assistantBusy) return;
+    setAssistantInput("");
+    setAssistantMessages((current) => [...current, { role: "user", content: message }]);
+    setAssistantBusy(true);
+    try {
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message,
+          context: {
+            workspaceName: data.workspace.name,
+            sprintName: activeSprint?.name,
+            sprintGoal: activeSprint?.goal,
+            sprints: data.sprints.map((sprint) => ({ id: sprint.id, name: sprint.name, status: sprint.status })),
+            tasks: sprintTasks.map((task) => ({
+              code: task.code,
+              title: task.title,
+              status: task.status,
+              priority: task.priority,
+              points: task.points,
+            })),
+          },
+        }),
+      });
+      const result = await response.json() as { reply?: string; error?: string; source?: string; action?: AssistantAction };
+      if (!response.ok) throw new Error(result.error ?? "No pudimos consultar al copiloto.");
+      setAssistantMessages((current) => [...current, {
+        role: "assistant",
+        content: result.reply ?? "No encontré una respuesta para eso.",
+        action: result.action,
+      }]);
+    } catch (assistantError) {
+      setAssistantMessages((current) => [...current, {
+        role: "assistant",
+        content: assistantError instanceof Error ? assistantError.message : "No pudimos consultar al copiloto.",
+      }]);
+    } finally {
+      setAssistantBusy(false);
+    }
+  };
+
+  const executeAssistantAction = async (action: AssistantAction) => {
+    if (action.type === "selectSprint") {
+      const sprintId = typeof action.payload.sprintId === "string" ? action.payload.sprintId : "";
+      if (!sprintId || !data.sprints.some((sprint) => sprint.id === sprintId)) return;
+      setSelectedSprintId(sprintId);
+      setAssistantMessages((current) => [...current, { role: "assistant", content: `Listo. Ahora estás viendo ${action.label}.` }]);
+      return;
+    }
+
+    const result = await mutate({ ...action.payload, action: action.type, workspaceId: data.workspace.id }, `${action.label} creado correctamente.`);
+    if (!result) return;
+    if (action.type === "createSprint" && result.sprintId) setSelectedSprintId(result.sprintId);
+    setAssistantMessages((current) => [...current, { role: "assistant", content: `Listo. ${action.label} ya está en tu espacio.` }]);
+  };
+
+  const resizeSidebar = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!sidebarResizing || sidebarCollapsed) return;
+    setSidebarWidth(Math.min(360, Math.max(220, event.clientX)));
+  };
+
+  const beginSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (sidebarCollapsed) return;
+    setSidebarResizing(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const endSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    setSidebarResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const toggleAssistant = () => {
+    if (assistantOpen) {
+      if (assistantClosing) return;
+      setAssistantClosing(true);
+      window.setTimeout(() => {
+        setAssistantOpen(false);
+        setAssistantClosing(false);
+      }, 280);
+      return;
+    }
+    setAssistantClosing(false);
+    setAssistantOpen(true);
+  };
+
   return (
-    <div className="app-shell">
-      <aside className={`sidebar${mobileMenu ? " sidebar-open" : ""}`}>
+    <div className={`app-shell${sidebarCollapsed ? " sidebar-is-collapsed" : ""}`} style={{ "--sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px` } as React.CSSProperties}>
+      <aside className={`sidebar${mobileMenu ? " sidebar-open" : ""}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
         <div className="sidebar-top">
           <div className="brand-lockup"><span className="brand-mark">S</span><span>Sprintia</span></div>
+          <button className="sidebar-collapse-button" onClick={() => setSidebarCollapsed(true)} aria-label="Ocultar barra lateral" title="Ocultar barra lateral">‹</button>
           <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú">×</button>
         </div>
+
+        <div
+          className="sidebar-resizer"
+          role="separator"
+          aria-label="Ajustar ancho de la barra lateral"
+          aria-orientation="vertical"
+          onPointerDown={beginSidebarResize}
+          onPointerMove={resizeSidebar}
+          onPointerUp={endSidebarResize}
+          onPointerCancel={endSidebarResize}
+        />
 
         <label className="workspace-picker">
           <span>Espacio de trabajo</span>
@@ -439,7 +640,7 @@ export function SprintiaApp({
             <button
               key={id}
               className={view === id ? "nav-active" : ""}
-              onClick={() => { setView(id); setMobileMenu(false); }}
+              onClick={() => navigateToView(id)}
             >
               <span aria-hidden="true">{icon}</span>{label}
               {id === "backlog" && <small>{data.tasks.filter((task) => !task.sprintId).length}</small>}
@@ -463,6 +664,8 @@ export function SprintiaApp({
         </div>
       </aside>
 
+      {sidebarCollapsed && <button className="sidebar-reopen" onClick={() => setSidebarCollapsed(false)} aria-label="Mostrar barra lateral" title="Mostrar barra lateral">›</button>}
+
       <main className="main-content">
         <header className="topbar">
           <button className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú">☰</button>
@@ -477,68 +680,71 @@ export function SprintiaApp({
 
         {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>Cerrar</button></div>}
 
-        {view === "board" && (
-          <BoardView
-            sprint={activeSprint}
-            sprints={data.sprints}
-            selectedSprintId={selectedSprintId}
-            onSprintChange={setSelectedSprintId}
-            tasks={filteredTasks}
-            members={data.members}
-            progress={progress}
-            donePoints={donePoints}
-            totalPoints={totalPoints}
-            search={search}
-            onSearch={setSearch}
-            priorityFilter={priorityFilter}
-            onPriorityFilter={setPriorityFilter}
-            assigneeFilter={assigneeFilter}
-            onAssigneeFilter={setAssigneeFilter}
+        <div key={view} className={`view-transition view-transition-${view}`}>
+          {view === "board" && (
+            <BoardView
+              sprint={activeSprint}
+              sprints={data.sprints}
+              selectedSprintId={selectedSprintId}
+              onSprintChange={setSelectedSprintId}
+              tasks={filteredTasks}
+              members={data.members}
+              progress={progress}
+              donePoints={donePoints}
+              totalPoints={totalPoints}
+              search={search}
+              onSearch={setSearch}
+              priorityFilter={priorityFilter}
+              onPriorityFilter={setPriorityFilter}
+              assigneeFilter={assigneeFilter}
+              onAssigneeFilter={setAssigneeFilter}
             onOpenTask={openTask}
             onMoveTask={moveTask}
             onNewTask={openNewTask}
-          />
-        )}
-        {view === "backlog" && (
-          <BacklogView
-            tasks={data.tasks.filter((task) => !task.sprintId || task.status === "backlog")}
-            sprint={activeSprint}
-            members={data.members}
-            onOpenTask={openTask}
-            onNewTask={() => openNewTask("backlog")}
-            onAddToSprint={(task) => void mutate(
-              { action: "updateTask", workspaceId: data.workspace.id, id: task.id, sprintId: activeSprint?.id, status: "todo" },
-              `${task.code} se añadió al sprint.`,
-            )}
-          />
-        )}
-        {view === "summary" && (
-          <SummaryView
-            sprint={activeSprint}
-            tasks={sprintTasks}
-            activities={data.activities}
-            progress={progress}
-            totalPoints={totalPoints}
-            donePoints={donePoints}
             onNewSprint={() => setModal("sprint")}
-          />
-        )}
-        {view === "team" && (
-          <TeamView
-            members={data.members}
-            tasks={sprintTasks}
-            inviteCode={data.workspace.inviteCode}
-            onInvite={() => setModal("invite")}
-          />
-        )}
-        {view === "settings" && (
-          <SettingsView
-            themePreference={themePreference}
-            textSizePreference={textSizePreference}
-            onThemeChange={changeThemePreference}
-            onTextSizeChange={changeTextSizePreference}
-          />
-        )}
+            />
+          )}
+          {view === "backlog" && (
+            <BacklogView
+              tasks={data.tasks.filter((task) => !task.sprintId || task.status === "backlog")}
+              sprint={activeSprint}
+              members={data.members}
+              onOpenTask={openTask}
+              onNewTask={() => openNewTask("backlog")}
+              onAddToSprint={(task) => void mutate(
+                { action: "updateTask", workspaceId: data.workspace.id, id: task.id, sprintId: activeSprint?.id, status: "todo" },
+                `${task.code} se añadió al sprint.`,
+              )}
+            />
+          )}
+          {view === "summary" && (
+            <SummaryView
+              sprint={activeSprint}
+              tasks={sprintTasks}
+              activities={data.activities}
+              progress={progress}
+              totalPoints={totalPoints}
+              donePoints={donePoints}
+              onNewSprint={() => setModal("sprint")}
+            />
+          )}
+          {view === "team" && (
+            <TeamView
+              members={data.members}
+              tasks={sprintTasks}
+              inviteCode={data.workspace.inviteCode}
+              onInvite={() => setModal("invite")}
+            />
+          )}
+          {view === "settings" && (
+            <SettingsView
+              themePreference={themePreference}
+              textSizePreference={textSizePreference}
+              onThemeChange={changeThemePreference}
+              onTextSizeChange={changeTextSizePreference}
+            />
+          )}
+        </div>
       </main>
 
       <nav className="mobile-nav" aria-label="Navegación móvil">
@@ -549,7 +755,7 @@ export function SprintiaApp({
           ["team", "◉", "Equipo"],
           ["settings", "⚙", "Ajustes"],
         ] as Array<[View, string, string]>).map(([id, icon, label]) => (
-          <button key={id} className={view === id ? "nav-active" : ""} onClick={() => setView(id)}><span aria-hidden="true">{icon}</span>{label}</button>
+          <button key={id} className={view === id ? "nav-active" : ""} onClick={() => navigateToView(id)}><span aria-hidden="true">{icon}</span>{label}</button>
         ))}
       </nav>
 
@@ -595,11 +801,35 @@ export function SprintiaApp({
       )}
       {modal === "sprint" && (
         <SprintModal busy={busy} onClose={() => setModal(null)} onSubmit={async (payload) => {
-          const ok = await mutate({ action: "createSprint", workspaceId: data.workspace.id, ...payload }, "Sprint creado correctamente.");
-          if (ok) setModal(null);
+          const result = await mutate({ action: "createSprint", workspaceId: data.workspace.id, ...payload }, "Sprint creado correctamente.");
+          if (result) {
+            if (result.sprintId) setSelectedSprintId(result.sprintId);
+            setModal(null);
+          }
         }} />
       )}
 
+      {assistantOpen && (
+        <AssistantPanel
+          messages={assistantMessages}
+          input={assistantInput}
+          busy={assistantBusy}
+          closing={assistantClosing}
+          onInput={setAssistantInput}
+          onSubmit={() => void askAssistant()}
+          onPrompt={(prompt) => void askAssistant(prompt)}
+          onAction={(action) => void executeAssistantAction(action)}
+          onClose={toggleAssistant}
+        />
+      )}
+      <button
+        className={`assistant-launcher${assistantOpen ? " assistant-launcher-open" : ""}`}
+        onClick={toggleAssistant}
+        aria-label={assistantOpen ? "Cerrar copiloto" : "Abrir copiloto de Sprintia"}
+        title="Sprintia Copiloto"
+      >
+        <span aria-hidden="true">✦</span><small>Copiloto</small>
+      </button>
       <button className="workspace-fab" onClick={() => setModal("workspace")} aria-label="Crear o unirse a otro proyecto" title="Cambiar de proyecto">＋</button>
       {toast && <div className="toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
       {busy && <div className="saving-indicator" role="status">Guardando…</div>}
@@ -626,6 +856,7 @@ function BoardView({
   onOpenTask,
   onMoveTask,
   onNewTask,
+  onNewSprint,
 }: {
   sprint: Sprint | null;
   sprints: Sprint[];
@@ -645,9 +876,10 @@ function BoardView({
   onOpenTask: (task: ScrumTask) => void;
   onMoveTask: (task: ScrumTask, status: TaskStatus) => void;
   onNewTask: (status: TaskStatus) => void;
+  onNewSprint: () => void;
 }) {
   if (!sprint) {
-    return <div className="content-pad"><EmptyState title="Todavía no hay un sprint" body="Crea tu primer sprint desde la vista Resumen." /></div>;
+    return <div className="content-pad"><EmptyState title="Todavía no hay un sprint" body="Crea tu primer sprint para comenzar a trabajar." action={<button className="primary-button" onClick={onNewSprint} type="button">+ Crear sprint</button>} /></div>;
   }
 
   const daysLeft = Math.max(0, Math.ceil((new Date(`${sprint.endDate}T23:59:59`).getTime() - APP_NOW) / 86_400_000));
@@ -663,6 +895,7 @@ function BoardView({
             </select>
           </label>
           <div className="sprint-goal"><span>Objetivo</span><strong>{sprint.goal || "Sin objetivo definido"}</strong></div>
+          <button className="sprint-add-button" onClick={onNewSprint} type="button">+ Sprint</button>
         </div>
         <div className="sprint-metrics">
           <div><strong>{daysLeft}</strong><span>días restantes</span></div>
@@ -885,8 +1118,8 @@ function SettingsView({
   ];
   const textSizeOptions: Array<{ id: TextSizePreference; label: string; detail: string; sample: string }> = [
     { id: "small", label: "Pequeño", detail: "Más contenido visible", sample: "Aa" },
-    { id: "medium", label: "Medio", detail: "Tamaño recomendado", sample: "Aa" },
-    { id: "large", label: "Grande", detail: "Lectura más cómoda", sample: "Aa" },
+    { id: "medium", label: "Medio", detail: "Más compacto", sample: "Aa" },
+    { id: "large", label: "Grande", detail: "Predeterminado y cómodo", sample: "Aa" },
     { id: "xlarge", label: "Muy grande", detail: "Máxima legibilidad", sample: "Aa" },
   ];
 
