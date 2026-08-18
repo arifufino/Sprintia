@@ -55,8 +55,14 @@ Requiere Node.js 24.
 | `AUTH_GOOGLE_SECRET` | Client secret del cliente OAuth de Google. |
 | `MONGODB_URI` | URI privada del clúster MongoDB Atlas. |
 | `MONGODB_DB` | Base de datos; por defecto `sprintia`. |
+| `OPENAI_API_KEY` | Opcional. Activa respuestas generativas del Copiloto en el servidor. |
+| `OPENAI_MODEL` | Opcional. Modelo de Responses API; por defecto `gpt-4o-mini`. |
 
 No uses el prefijo `NEXT_PUBLIC_` para estas variables ni publiques valores reales en GitHub.
+
+El botón **Copiloto** funciona también sin `OPENAI_API_KEY`: en ese caso responde con una guía local basada en el sprint actual y no envía el contexto fuera de Sprintia. Si configuras la clave en Vercel, se usa únicamente desde el servidor y nunca se expone al navegador.
+
+El Copiloto también reconoce comandos confirmables como `crea un sprint llamado Diseño`, `crea una tarea en el backlog llamada Revisar fuentes` y `cambia al sprint Diseño`. Las acciones que modifican el proyecto siempre requieren pulsar **Ejecutar** dentro del panel.
 
 Para MongoDB Atlas crea un usuario exclusivo para Sprintia con permiso `readWrite` únicamente sobre la base `sprintia`. Usa una contraseña larga y única, autoriza solo la conectividad necesaria para Vercel y codifica los caracteres especiales de la contraseña dentro de la URI.
 
