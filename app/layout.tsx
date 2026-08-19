@@ -1,6 +1,19 @@
 import type { Metadata, Viewport } from "next";
+import { DM_Sans, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-dm-sans",
+  display: "swap",
+});
+
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+  display: "swap",
+});
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -48,8 +61,10 @@ const preferenceBootScript = `
   (() => {
     const validThemes = ["light", "dark", "system"];
     const validTextSizes = ["small", "medium", "large", "xlarge"];
-    let theme = "system";
-    let textSize = "medium";
+    // The product opens in the dark, editorial presentation used by Sprintia.
+    // Users can still switch to light or system mode from Configuración.
+    let theme = "dark";
+    let textSize = "large";
     try {
       const savedTheme = localStorage.getItem("sprintia-theme");
       const savedTextSize = localStorage.getItem("sprintia-text-size");
@@ -71,7 +86,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="es" suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: preferenceBootScript }} /></head>
-      <body>{children}</body>
+      <body className={`${dmSans.variable} ${geistMono.variable}`}>{children}</body>
     </html>
   );
 }

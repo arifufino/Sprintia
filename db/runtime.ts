@@ -548,8 +548,9 @@ export async function createSprint(user: AppUser, payload: Record<string, unknow
   if (endDate < startDate) throw new UserFacingError("La fecha final debe ser igual o posterior a la inicial.");
   const store = collections(await database());
   const status: SprintStatus = (await store.sprints.countDocuments({ workspaceId })) === 0 ? "active" : "planned";
+  const sprintId = newId("sp");
   await store.sprints.insertOne({
-    _id: newId("sp"),
+    _id: sprintId,
     workspaceId,
     name,
     goal: cleanText(payload.goal, 300),
@@ -559,6 +560,7 @@ export async function createSprint(user: AppUser, payload: Record<string, unknow
     createdAt: new Date().toISOString(),
   });
   await addActivity(workspaceId, user.id, `creó ${name}`);
+  return sprintId;
 }
 
 export async function createWorkspace(user: AppUser, payload: Record<string, unknown>) {

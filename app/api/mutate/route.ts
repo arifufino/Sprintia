@@ -63,6 +63,7 @@ export async function POST(request: Request) {
     }
     const body = parsedBody as MutationBody;
     let workspaceId: string | undefined;
+    let sprintId: string | undefined;
     const {
       createSprint,
       createTask,
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
         await deleteTask(user, body);
         break;
       case "createSprint":
-        await createSprint(user, body);
+        sprintId = await createSprint(user, body);
         break;
       case "createWorkspace":
         workspaceId = await createWorkspace(user, body);
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
         return jsonResponse({ error: "Acción no válida." }, 400);
     }
 
-    return jsonResponse({ ok: true, workspaceId });
+    return jsonResponse({ ok: true, workspaceId, sprintId });
   } catch (error) {
     const status = userFacingStatus(error);
     if (status === 500) console.error("No pudimos guardar el cambio.", error);
