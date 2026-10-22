@@ -1,0 +1,23 @@
+/* Adapt legacy views to usable workspace width, including a resized sidebar. */
+@container workspace (max-width: 1050px) {
+  .team-layout, .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .backlog-list-header { display: none; }
+  .backlog-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-3); }
+  .backlog-row > div:first-child { grid-column: 1 / -1; }
+}
+@container workspace (max-width: 750px) {
+  .section-intro { align-items: stretch; flex-direction: column; gap: var(--space-4); }
+  .settings-preview { grid-template-columns: minmax(0, 1fr); }
+  .summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .member-card { grid-template-columns: auto minmax(0, 1fr); }
+  .member-work { grid-column: 1 / -1; }
+}
+@container workspace (max-width: 480px) {
+  .backlog-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .backlog-row > .story-points { display: none; }
+  .backlog-summary span { padding-inline: var(--space-2); }
+  .invite-card code { overflow-wrap: anywhere; }
+}
+.navigation-recovery { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.modal-heading-controls { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }

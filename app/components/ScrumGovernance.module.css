@@ -1,0 +1,28 @@
+.settings { padding-top: 0; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
+.heading h2 { margin: 6px 0; font-size: var(--text-lg); }
+.heading p, .hint { color: var(--muted); font-size: var(--text-sm); line-height: 1.6; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--space-5); }
+.card { min-width: 0; padding: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); color: var(--ink); }
+.card h3 { font-size: var(--text-md); margin: 0 0 12px; }
+.card h3:not(:first-child) { margin-top: 24px; }
+.prose, .criteria, .responsibilities dd { white-space: pre-wrap; overflow-wrap: anywhere; }
+.criteria { padding-left: 20px; display: grid; gap: 10px; font-size: var(--text-sm); }
+.responsibilities { display: grid; gap: 18px; }
+.responsibilities dt { color: var(--muted); font-size: var(--text-xs); }
+.responsibilities dd { margin: 3px 0 0; font-size: var(--text-sm); }
+.badge { display: inline-flex; align-items: center; width: fit-content; font-size: var(--text-xs); line-height: 1.5; padding: 4px 9px; border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--ink); background: var(--surface); }
+.roles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.accessButton { margin-top: 12px; width: fit-content; }
+.form textarea { resize: vertical; min-height: 88px; }
+.fields { border: 0; padding: 0; margin: 0; display: grid; gap: 16px; min-width: 0; }
+.developers { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 16px; min-width: 0; }
+.developers legend { font-size: var(--text-sm); font-weight: 600; padding: 0 6px; }
+.check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: var(--text-sm); }
+.check input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--brand); }
+.check span { overflow-wrap: anywhere; }
+.notice { background: var(--brand-soft); color: var(--ink); padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); font-size: var(--text-sm); }
+.notice p { margin: 8px 0; line-height: 1.6; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+@container workspace (max-width: 800px) { .grid { grid-template-columns: minmax(0, 1fr); } .heading { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 620px) { .grid { grid-template-columns: minmax(0, 1fr); } .heading { align-items: flex-start; flex-direction: column; } .card { padding: 18px; } .actions > button { flex: 1 1 160px; } }

@@ -1,5 +1,5 @@
 export class UserFacingError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public readonly status: 400 | 403 | 409 | 503 = 400) {
     super(message);
     this.name = "UserFacingError";
   }
@@ -10,5 +10,5 @@ export function userFacingMessage(error: unknown, fallback: string) {
 }
 
 export function userFacingStatus(error: unknown) {
-  return error instanceof UserFacingError ? 400 : 500;
+  return error instanceof UserFacingError ? error.status : 500;
 }

@@ -1,0 +1,49 @@
+.board { display: grid; gap: var(--space-6); min-width: 0; padding: var(--space-6) var(--page-gutter); }
+.overview { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-6); align-items: center; padding: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); color: var(--ink); box-shadow: var(--neu-raised); }
+.sprintDetails { display: grid; grid-template-columns: minmax(120px, .5fr) minmax(0, 1fr) auto; align-items: center; gap: var(--space-5); min-width: 0; }
+.label { display: block; color: var(--muted); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .065em; }
+.sprintPicker { min-width: 0; }
+.sprintPicker select { width: 100%; min-width: 0; min-height: 40px; margin-top: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font-size: var(--text-sm); font-weight: 700; text-overflow: ellipsis; box-shadow: var(--neu-inset); }
+.goal { display: grid; gap: var(--space-2); min-width: 0; border-left: 1px solid #d6d3cd; padding-left: var(--space-5); }
+.goal strong { font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.addSprint { min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font-size: var(--text-sm); font-weight: 600; white-space: nowrap; box-shadow: var(--neu-raised-sm); }
+.addSprint:hover { background: var(--brand-soft); }
+.metrics { display: flex; align-items: center; gap: var(--space-5); }
+.metrics > div:not(.progress) { display: grid; gap: 4px; }
+.metrics strong { font-size: var(--text-lg); line-height: 1.3; }
+.metrics strong small { font-size: var(--text-xs); color: var(--muted); }
+.progress { display: grid; place-items: center; flex: 0 0 56px; width: 56px; height: 56px; border-radius: 50%; background: conic-gradient(#596b79 var(--progress), #d8d5cf 0); }
+.progress span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: var(--surface); font-size: var(--text-xs); font-weight: 700; box-shadow: var(--neu-inset); }
+.toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, .7fr) minmax(155px, .6fr) auto; align-items: center; gap: var(--space-3); min-width: 0; }
+.search { display: flex; gap: var(--space-2); align-items: center; min-width: 0; padding-inline: 14px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); }
+.search svg { flex: 0 0 18px; color: var(--muted); }
+.search input { min-width: 0; width: 100%; min-height: 44px; border: 0; background: transparent; font-size: var(--text-sm); }
+.search:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.search input:focus-visible { outline: none; box-shadow: none; }
+.toolbar > select { width: 100%; min-width: 0; min-height: 46px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font-size: var(--text-sm); text-overflow: ellipsis; }
+.count { font-size: var(--text-xs); color: var(--muted); white-space: nowrap; }
+.search, .toolbar > select { box-shadow: var(--neu-inset); }
+.goal { border-color: var(--line); }
+.board :global(.kanban) { min-width: 0; max-width: 100%; margin: 0; padding: 14px 10px; grid-template-columns: repeat(4, minmax(min(16rem, 100%), 1fr)); gap: var(--space-5); overscroll-behavior-x: contain; }
+@container workspace (max-width: 1050px) {
+  .overview { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
+  .metrics { border-top: 1px solid var(--line); padding-top: var(--space-4); }
+  .progress { margin-left: auto; }
+}
+@container workspace (max-width: 850px) {
+  .toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .search { grid-column: 1 / -1; }
+}
+@container workspace (max-width: 600px) {
+  .overview { padding: var(--space-4); }
+  .sprintDetails { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-4); }
+  .goal { grid-row: 2; grid-column: 1 / -1; padding-left: 0; border: 0; }
+  .addSprint { grid-column: 2; grid-row: 1; }
+  .metrics { gap: var(--space-3); flex-wrap: wrap; }
+  .metrics .label { letter-spacing: 0; text-transform: none; }
+  .toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .count { grid-column: 1 / -1; justify-self: end; }
+}
+@container workspace (max-width: 370px) {
+  .toolbar { grid-template-columns: minmax(0, 1fr); }
+}

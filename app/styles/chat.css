@@ -1,0 +1,72 @@
+/* Visual-only refresh. Keep the existing chat and its shared overlay lifecycle. */
+.assistant-panel.assistant-soft {
+  width: min(380px, calc(100vw - 32px));
+  height: min(620px, calc(100dvh - 128px));
+  max-height: calc(100dvh - 128px);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  box-shadow: var(--shadow), var(--neu-raised);
+  backdrop-filter: none;
+}
+.assistant-soft .assistant-header { gap: 10px; padding: 18px; border-color: var(--line); }
+.assistant-soft .assistant-heading { min-width: 0; gap: 12px; }
+.assistant-soft .assistant-heading strong { color: var(--ink); font-size: var(--text-md); }
+.assistant-soft .assistant-heading small { color: var(--muted); font-size: var(--text-xs); }
+.assistant-soft .assistant-orb, .assistant-soft .assistant-message-mark {
+  flex-shrink: 0; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); box-shadow: var(--neu-inset); animation: none;
+}
+.assistant-soft .assistant-orb { width: 38px; height: 38px; border-radius: 14px; }
+.assistant-panel.assistant-soft .assistant-close {
+  flex: 0 0 36px; width: 36px; height: 36px; border-radius: 12px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+  box-shadow: var(--neu-raised-sm);
+}
+.assistant-soft .assistant-close svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.7; fill: none; }
+.assistant-soft .assistant-close:hover { background: var(--surface); color: var(--ink); border-color: var(--muted); box-shadow: var(--neu-raised); transform: translateY(-1px); }
+.assistant-soft .assistant-close:active { transform: none; box-shadow: var(--neu-inset); }
+.assistant-soft .assistant-messages { min-height: 64px; padding: 18px; gap: 18px; scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
+.assistant-soft .assistant-message { min-width: 0; max-width: 95%; box-shadow: none; }
+.assistant-soft .assistant-message-body { min-width: 0; }
+.assistant-soft .assistant-message p { overflow-wrap: anywhere; font-size: var(--text-sm); line-height: 1.55; border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; }
+.assistant-soft .assistant-message-assistant p { background: var(--surface); color: var(--ink); box-shadow: var(--neu-raised-sm); border-top-left-radius: 5px; }
+.assistant-soft .assistant-message-user p { background: var(--surface); color: var(--ink); box-shadow: var(--neu-inset); border-bottom-right-radius: 5px; }
+.assistant-soft .assistant-message-mark { margin-top: 4px; }
+.assistant-soft .assistant-prompts { flex-wrap: wrap; flex-shrink: 0; overflow: visible; gap: 8px; padding: 8px 18px 16px; }
+.assistant-soft .assistant-prompts button, .assistant-soft .assistant-action {
+  min-width: 0; max-width: 100%; white-space: normal; text-align: left;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+  box-shadow: var(--neu-raised-sm); font-size: var(--text-xs); padding: 8px 11px;
+  transition: box-shadow 150ms var(--motion-ease), transform 150ms var(--motion-ease);
+}
+.assistant-soft .assistant-prompts button:hover, .assistant-soft .assistant-action:hover:not(:disabled) { background: var(--surface); color: var(--ink); transform: translateY(-1px); filter: none; }
+.assistant-soft .assistant-prompts button:active, .assistant-soft .assistant-action:active { box-shadow: var(--neu-inset); transform: none; }
+.assistant-soft .assistant-form { flex-shrink: 0; gap: 10px; align-items: center; padding: 16px 18px 10px; border-color: var(--line); }
+.assistant-soft .assistant-form textarea {
+  min-height: 88px; max-height: 160px; field-sizing: content; resize: none; overflow-y: auto;
+  border-radius: 16px; padding: 12px; background: var(--surface); color: var(--ink);
+  border-color: var(--line); box-shadow: var(--neu-inset); line-height: 1.5; font-size: var(--text-sm);
+  scrollbar-width: none;
+}
+.assistant-soft .assistant-form textarea:focus { border-color: var(--focus); }
+.assistant-soft .assistant-form > button { flex: 0 0 42px; width: 42px; height: 42px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--neu-raised-sm); }
+.assistant-soft .assistant-form > button:hover:not(:disabled) { background: var(--surface); transform: translateY(-1px); }
+.assistant-soft .assistant-form > button:active:not(:disabled) { box-shadow: var(--neu-inset); transform: none; }
+.assistant-soft .assistant-form > button:disabled { cursor: default; opacity: .5; }
+.assistant-soft .assistant-disclaimer { flex-shrink: 0; padding: 0 18px 18px; color: var(--muted); font-size: var(--text-xs); }
+.assistant-soft :is(button, textarea):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+@media (max-width: 620px) {
+  .assistant-panel.assistant-soft { right: 16px; bottom: 112px; height: min(620px, calc(100dvh - 136px)); max-height: calc(100dvh - 136px); }
+  .assistant-soft .assistant-header { padding: 14px; }
+  .assistant-soft .assistant-heading { gap: 8px; }
+}
+@media (max-height: 540px) {
+  .assistant-panel.assistant-soft { bottom: 16px; height: calc(100dvh - 32px); max-height: calc(100dvh - 32px); }
+  .assistant-soft .assistant-prompts { display: none; }
+  .assistant-soft .assistant-disclaimer { padding-bottom: 10px; }
+}
+@media (forced-colors: active) {
+  .assistant-soft :is(button, textarea, .assistant-orb, .assistant-message-mark, .assistant-message p) { box-shadow: none; border: 1px solid ButtonText; }
+}

@@ -1,0 +1,43 @@
+.form, .confirm { min-width: 0; font-size: var(--text-sm); }
+.form small, .form p, .confirm p, .status p { color: var(--muted); font-size: var(--text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+.form input, .form textarea { min-width: 0; max-width: 100%; }
+.availability { border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-4); }
+.availability summary { cursor: pointer; font-weight: 600; font-size: var(--text-sm); }
+.availability[open] { display: grid; gap: var(--space-4); }
+.availability .field, .availability > label { margin-top: var(--space-4); }
+.work { display: grid; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.work h3, .confirm h3 { margin: 0; font-size: var(--text-lg); }
+.work p { margin: 0; }
+.totals { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.tasks { padding: 0; margin: 0; list-style: none; display: grid; gap: var(--space-2); }
+.tasks label { display: flex; gap: var(--space-3); align-items: flex-start; min-height: 48px; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; transition: background 160ms ease; }
+.tasks label:has(input:checked) { background: var(--surface-raised, var(--surface)); border-color: var(--muted); }
+.tasks input { flex: 0 0 18px; width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--ink); }
+.tasks span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.tasks strong { font-size: var(--text-sm); }
+.notice { padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); overflow-wrap: anywhere; }
+.status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-5); padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.status > div:first-child { flex: 1 1 300px; min-width: 0; }
+.status h2 { margin: var(--space-2) 0; font-size: var(--text-lg); }
+.status p { margin: var(--space-2) 0 0; }
+.status { box-shadow: var(--neu-raised); }
+.totals, .availability { box-shadow: var(--neu-inset); }
+.badge { font-size: var(--text-xs); font-weight: 600; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 10px; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.confirm { display: grid; gap: var(--space-4); }
+.confirm p, .confirm dl { margin: 0; }
+.confirm dl { display: grid; gap: var(--space-2); }
+.confirm dt { font-size: var(--text-xs); color: var(--muted); }
+.confirm dd { margin: 0 0 var(--space-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .status { padding: var(--space-4); }
+  .actions { width: 100%; }
+  .actions button { flex: 1 1 140px; }
+  .form :global(.form-row) { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 360px) {
+  .status { gap: var(--space-3); }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+  .actions button { min-width: 0; padding-inline: 10px; white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) { .tasks label { transition: none; } }

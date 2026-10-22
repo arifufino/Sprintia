@@ -3,6 +3,7 @@ import { signOutOfSprintia } from "./actions";
 import { getAppUser } from "./lib/auth";
 import { SignInPage } from "./SignInPage";
 import { SprintiaApp } from "./SprintiaApp";
+import { signInDestination } from "./lib/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export const metadata: Metadata = {
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ join?: string; error?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
   const joinCode = typeof params.join === "string" && /^[A-Z0-9]{8,20}$/i.test(params.join)
@@ -30,7 +31,11 @@ export default async function Home({
   const user = await getAppUser();
 
   if (!user) {
-    return <SignInPage joinCode={joinCode} authError={authError} isConfigured={isConfigured} />;
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) query.append(key, item);
+    }
+    return <SignInPage returnTo={signInDestination(`/?${query}`)} authError={authError} isConfigured={isConfigured} />;
   }
 
   return (

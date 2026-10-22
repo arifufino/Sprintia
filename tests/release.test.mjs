@@ -8,7 +8,7 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 test("uses the production Vercel stack", async () => {
   const packageJson = JSON.parse(await read("package.json"));
   assert.equal(packageJson.scripts.build, "next build");
-  assert.equal(packageJson.dependencies.next, "16.3.0");
+  assert.equal(packageJson.dependencies.next, "16.3.8");
   assert.equal(packageJson.dependencies["next-auth"], "5.0.0-beta.32");
   assert.equal(packageJson.dependencies.mongodb, "6.21.0");
   assert.equal(packageJson.dependencies["drizzle-orm"], undefined);
@@ -38,7 +38,7 @@ test("includes Google access and local appearance preferences", async () => {
 
 test("keeps authorization checks on every shared mutation", async () => {
   const runtime = await read("db/runtime.ts");
-  assert.match(runtime, /isMember\(workspaceId, user\.id\)/);
+  assert.match(runtime, /isMember\(workspaceId, user\.id, session\)/);
   assert.match(runtime, /\{ _id: id, workspaceId \}/);
 });
 

@@ -16,10 +16,31 @@ import type {
   Sprint,
   TaskPriority,
   TaskStatus,
+  Workspace,
 } from "./lib/types";
 
-type View = "board" | "backlog" | "summary" | "team" | "settings";
-type Modal = "task" | "invite" | "workspace" | "sprint" | null;
+import { AppShell, type View } from "./components/AppShell";
+import { BoardToolbar, SprintOverview } from "./components/BoardHeader";
+import boardStyles from "./components/BoardLayout.module.css";
+import { DialogLifecycle, ModalShell } from "./components/ModalShell";
+import { useDisclosure, useExitMotion, useOverlayLayer, type Disclosure } from "./components/overlay";
+import { useWorkspaceNavigation } from "./components/useWorkspaceNavigation";
+import { NavigationError } from "./components/NavigationError";
+import { defaultNavigation } from "./lib/navigation";
+import { accessLabels, canManageAccess, canManageProject, scrumLabels } from "./lib/permissions";
+import { InviteModal, MemberAccessModal, ScrumConfigurationModal, ScrumSettings } from "./components/ScrumGovernance";
+import governanceStyles from "./components/ScrumGovernance.module.css";
+import { TaskModal } from "./components/TaskModal";
+import { BacklogView } from "./components/BacklogView";
+import { SprintPlanModal, SprintPlanStatus, StartSprintModal } from "./components/SprintPlanning";
+import { EndSprintModal, isFinishedSprint, SprintArchive, SprintHistoryModal, SprintLifecycleActions } from "./components/SprintLifecycle";
+import { DailyView, localDay } from "./components/DailyView";
+import { ReviewView } from "./components/ReviewView";
+import { RetroView } from "./components/RetroView";
+import { ReportsView } from "./components/ReportsView";
+import { ProjectData } from "./components/ProjectData";
+import { persistPendingTask, readPendingTask, settlePendingTask, taskDraftKey, type PendingChange } from "./lib/task-drafts";
+type Modal = "task" | "invite" | "workspace" | "sprint" | "planSprint" | "startSprint" | "closeSprint" | "cancelSprint" | "sprintHistory" | "scrum" | "access" | null;
 type ThemePreference = "light" | "dark" | "system";
 type TextSizePreference = "small" | "medium" | "large" | "xlarge";
 type AssistantAction = {
@@ -29,11 +50,8 @@ type AssistantAction = {
 };
 type AssistantMessage = { role: "assistant" | "user"; content: string; action?: AssistantAction };
 type MutationResult = { ok?: boolean; error?: string; workspaceId?: string; sprintId?: string };
-
 const THEME_STORAGE_KEY = "sprintia-theme";
 const TEXT_SIZE_STORAGE_KEY = "sprintia-text-size";
-const SIDEBAR_WIDTH_STORAGE_KEY = "sprintia-sidebar-width";
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "sprintia-sidebar-collapsed";
 
 const isThemePreference = (value: string | null): value is ThemePreference =>
   value === "light" || value === "dark" || value === "system";
@@ -62,22 +80,11 @@ function applyThemePreference(preference: ThemePreference) {
   document.documentElement.style.colorScheme = resolved;
 
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  themeColor?.setAttribute("content", resolved === "dark" ? "#101520" : "#f5f6f8");
+  themeColor?.setAttribute("content", resolved === "dark" ? "#242931" : "#e9edf2");
 }
 
 function applyTextSizePreference(preference: TextSizePreference) {
   document.documentElement.dataset.textSize = preference;
-}
-
-function initialSidebarWidth() {
-  if (typeof window === "undefined") return 248;
-  const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-  return Number.isFinite(saved) ? Math.min(360, Math.max(220, saved)) : 248;
-}
-
-function initialSidebarCollapsed() {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
 }
 
 const statusMeta: Array<{
@@ -108,7 +115,11 @@ const priorityLabels: Record<TaskPriority, string> = {
 
 const viewTitles: Record<View, { eyebrow: string; title: string }> = {
   board: { eyebrow: "Sprint activo", title: "Tablero" },
-  backlog: { eyebrow: "Próximamente", title: "Backlog" },
+  backlog: { eyebrow: "Producto", title: "Backlog" },
+  daily: { eyebrow: "Inspección y adaptación", title: "Daily" },
+  review: { eyebrow: "Resultado y aprendizaje", title: "Review" },
+  retro: { eyebrow: "Aprendizaje y mejora continua", title: "Retrospectiva" },
+  reports: { eyebrow: "Evolución y contexto del equipo", title: "Informes" },
   summary: { eyebrow: "Estado del proyecto", title: "Resumen" },
   team: { eyebrow: "Personas y carga", title: "Equipo" },
   settings: { eyebrow: "Tu experiencia", title: "Configuración" },
@@ -161,7 +172,7 @@ function AssistantPanel({
   messages,
   input,
   busy,
-  closing,
+  state,
   onInput,
   onSubmit,
   onPrompt,
@@ -171,7 +182,7 @@ function AssistantPanel({
   messages: AssistantMessage[];
   input: string;
   busy: boolean;
-  closing: boolean;
+  state: Disclosure<boolean>;
   onInput: (value: string) => void;
   onSubmit: () => void;
   onPrompt: (value: string) => void;
@@ -179,15 +190,18 @@ function AssistantPanel({
   onClose: () => void;
 }) {
   const prompts = ["¿Qué hago después?", "Dame un resumen", "Ayúdame a priorizar"];
+  const ref = useRef<HTMLElement>(null);
+  useExitMotion(ref, state.closing, state.finish);
+  useOverlayLayer({ ref, modal: false, origin: state.origin, onClose });
 
   return (
-    <aside className={`assistant-panel${closing ? " assistant-panel-closing" : ""}`} role="dialog" aria-modal="false" aria-labelledby="assistant-title">
+    <aside ref={ref} className="assistant-panel assistant-soft" inert={state.closing} data-motion={state.closing ? "closing" : "open"} role="dialog" aria-modal="false" aria-labelledby="assistant-title">
       <header className="assistant-header">
         <div className="assistant-heading">
           <span className="assistant-orb" aria-hidden="true">✦</span>
           <div><strong id="assistant-title">Sprintia Copiloto</strong><small>Tu contexto, en una conversación</small></div>
         </div>
-        <button className="assistant-close" onClick={onClose} aria-label="Cerrar copiloto">×</button>
+        <button className="assistant-close" onClick={onClose} aria-label="Cerrar copiloto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg></button>
       </header>
       <div className="assistant-messages" aria-live="polite">
         {messages.map((message, index) => (
@@ -207,48 +221,6 @@ function AssistantPanel({
       </form>
       <small className="assistant-disclaimer">Sugerencias para organizarte. Tú decides qué cambia en el tablero.</small>
     </aside>
-  );
-}
-
-function ModalShell({ title, subtitle, onClose, children, wide = false }: {
-  title: string;
-  subtitle?: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  wide?: boolean;
-}) {
-  const [closing, setClosing] = useState(false);
-  const close = useCallback(() => {
-    if (closing) return;
-    setClosing(true);
-    window.setTimeout(onClose, 240);
-  }, [closing, onClose]);
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => event.key === "Escape" && close();
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [close]);
-
-  return (
-    <div className={`modal-backdrop${closing ? " modal-closing" : ""}`} role="presentation" onMouseDown={close}>
-      <section
-        className={`modal-card${wide ? " modal-wide" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modal-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="modal-heading">
-          <div>
-            <h2 id="modal-title">{title}</h2>
-            {subtitle && <p>{subtitle}</p>}
-          </div>
-          <button className="icon-button" onClick={close} aria-label="Cerrar ventana">×</button>
-        </div>
-        {children}
-      </section>
-    </div>
   );
 }
 
@@ -275,25 +247,33 @@ export function SprintiaApp({
   signOutAction: () => Promise<void>;
   initialJoinCode?: string;
 }) {
-  const [data, setData] = useState<BootstrapData | null>(null);
-  const [view, setView] = useState<View>("board");
-  const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
-  const [sidebarResizing, setSidebarResizing] = useState(false);
-  const [modal, setModal] = useState<Modal>(null);
+  const navigation = useWorkspaceNavigation();
+  const { data, setData, route } = navigation;
+  const { view, search, priority: priorityFilter, assignee: assigneeFilter } = route;
+  const selectedSprintId = route.sprint ?? "";
+  const modalState = useDisclosure<Exclude<Modal, null>>();
+  const modal = modalState.value;
+  const setModal = modalState.open;
   const [selectedTask, setSelectedTask] = useState<ScrumTask | null>(null);
-  const [selectedSprintId, setSelectedSprintId] = useState("");
-  const [search, setSearch] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriority>("all");
-  const [assigneeFilter, setAssigneeFilter] = useState("all");
+  const [confirmedTaskId, setConfirmedTaskId] = useState<string | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
+  const mutationPending = useRef(false);
+  const pendingChange = useRef<PendingChange | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const closingLinkedTask = useRef<string | undefined>(undefined);
+  const historyWaiters = useRef<Array<() => void>>([]);
+  const closeModal = () => {
+    if (mutationPending.current) return;
+    if (route.task) { closingLinkedTask.current = route.task; navigation.closeTask(); }
+    modalState.close();
+  };
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
-  const [mobileMenu, setMobileMenu] = useState(false);
   const [themePreference, setThemePreference] = useState<ThemePreference>(initialThemePreference);
   const [textSizePreference, setTextSizePreference] = useState<TextSizePreference>(initialTextSizePreference);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const [assistantClosing, setAssistantClosing] = useState(false);
+  const assistantState = useDisclosure<boolean>();
+  const assistantOpen = assistantState.value !== null;
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
@@ -301,10 +281,6 @@ export function SprintiaApp({
   ]);
   const joinedFromLink = useRef(false);
 
-  useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
-  }, [sidebarWidth, sidebarCollapsed]);
 
   useEffect(() => {
     const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
@@ -358,34 +334,45 @@ export function SprintiaApp({
     applyTextSizePreference(preference);
   };
 
-  const load = useCallback(async (workspaceId?: string, quiet = false) => {
-    if (!quiet) setError("");
-    try {
-      const query = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
-      const response = await fetch(`/api/bootstrap${query}`, { cache: "no-store" });
-      const payload = (await response.json()) as BootstrapData & { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "No pudimos cargar el tablero.");
-      setData(payload);
-      setSelectedSprintId((current) => {
-        if (current && payload.sprints.some((sprint) => sprint.id === current)) return current;
-        return payload.sprints.find((sprint) => sprint.status === "active")?.id ?? payload.sprints[0]?.id ?? "";
-      });
-    } catch (loadError) {
-      if (!quiet) setError(loadError instanceof Error ? loadError.message : "No pudimos cargar el tablero.");
+  const { go, update, refresh, pauseSync, current: navigationCurrent, beforeHistoryChange, historyChanging } = navigation;
+  useEffect(() => {
+    const restored = readPendingTask(user.id);
+    if (restored && !pendingChange.current) {
+      pendingChange.current = restored;
+      setUncertain(true);
+      pauseSync(true);
+      setError("Se recuperó un cambio sin confirmar de esta pestaña. Reinténtalo para comprobar su resultado sin duplicarlo.");
     }
-  }, []);
+  }, [user.id, pauseSync]);
+  const setSelectedSprintId = (sprint: string) => { void update({ sprint }); };
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
+    beforeHistoryChange.current = () => {
+      if (!modal) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        historyWaiters.current.push(resolve);
+        if (!mutationPending.current) modalState.close();
+      });
+    };
+    if (!busy && historyWaiters.current.length) modalState.close();
+    if (!modal) historyWaiters.current.splice(0).forEach((resolve) => resolve());
+    return () => { beforeHistoryChange.current = null; };
+  }, [beforeHistoryChange, busy, modal, modalState.close]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && data) void load(data.workspace.id, true);
-    }, 25_000);
-    return () => window.clearInterval(timer);
-  }, [data, load]);
+    if (closingLinkedTask.current !== route.task) closingLinkedTask.current = undefined;
+    if (historyChanging) return;
+    if (!data) {
+      // Revoked access must remove stale details, even if a dialog was open.
+      if (modal) { modalState.close(); modalState.finish(); }
+      return;
+    }
+    const task = data.tasks.find((item) => item.id === route.task);
+    if (task && closingLinkedTask.current !== task.id) {
+      if (!modal) { setSelectedTask(task); setConfirmedTaskId(null); modalState.open("task"); }
+      else if (modal !== "task" || selectedTask?.id !== task.id) modalState.close();
+    } else if (!route.task && modal === "task" && selectedTask?.id && !busy) modalState.close();
+  }, [data, route.task, historyChanging, busy, modal, selectedTask?.id, modalState.open, modalState.close, modalState.finish]);
 
   useEffect(() => {
     if (!toast) return;
@@ -393,32 +380,75 @@ export function SprintiaApp({
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    if (!uncertain) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [uncertain]);
+
   const mutate = useCallback(async (
     payload: Record<string, unknown>,
     successMessage: string,
-    options?: { switchTo?: string },
+    options?: PendingChange["options"],
   ) => {
+    if (mutationPending.current) return false;
+    if (pendingChange.current && JSON.stringify(pendingChange.current.payload) !== JSON.stringify(payload)) {
+      setError("Hay un cambio sin confirmar. Reinténtalo antes de enviar otro; tu borrador sigue aquí.");
+      return false;
+    }
+    const intent = pendingChange.current ?? { payload, message: successMessage, options, mutationId: crypto.randomUUID(), workspaceId: data?.workspace.id };
+    pendingChange.current = intent;
+    persistPendingTask(user.id, intent);
+    mutationPending.current = true;
+    setConfirmedTaskId(null);
+    pauseSync(true);
     setBusy(true);
     setError("");
+    let confirmed = false;
+    let saved = false;
     try {
       const response = await fetch("/api/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...intent.payload, mutationId: intent.mutationId }),
       });
+      // 4xx is a definite rejection. A lost/invalid response or 5xx is uncertain:
+      // preserve the exact intent and key until the server confirms its outcome.
+      if (response.status >= 400 && response.status < 500) confirmed = true;
       const result = (await response.json()) as MutationResult;
-      if (!response.ok) throw new Error(result.error ?? "No pudimos guardar el cambio.");
-      const nextWorkspace = options?.switchTo ?? result.workspaceId ?? data?.workspace.id;
-      await load(nextWorkspace);
-      setToast(successMessage);
+      if (!response.ok) {
+        if ((response.status === 409 || response.status === 403 || response.status === 400)
+          && navigationCurrent.current.route.workspace === intent.workspaceId) await refresh();
+        throw new Error(result.error ?? "No pudimos guardar el cambio.");
+      }
+      if (result.ok !== true) throw new Error("La respuesta del servidor no confirma el cambio.");
+      confirmed = true;
+      saved = true;
+      settlePendingTask(user.id, intent, true);
+      // A refresh of our own acknowledged edit/removal is not a remote conflict.
+      if (["updateTask", "deleteTask"].includes(String(intent.payload.action))) setConfirmedTaskId(String(intent.payload.id));
+      const nextWorkspace = intent.options?.switchTo ?? result.workspaceId ?? intent.workspaceId;
+      // A late save/refresh must never navigate away from a newer project selection.
+      if (navigationCurrent.current.route.workspace === intent.workspaceId) {
+        if (nextWorkspace && nextWorkspace !== intent.workspaceId) await go({ ...defaultNavigation, workspace: nextWorkspace }, "push", false, true);
+        else await refresh(payload.action === "deleteTask" && payload.id === navigationCurrent.current.route.task ? { task: undefined } : undefined);
+      }
+      setToast(intent.message);
       return result;
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : "No pudimos guardar el cambio.");
+      const message = mutationError instanceof Error ? mutationError.message : "No pudimos guardar el cambio.";
+      setError(confirmed ? message : `${message} No pudimos confirmar el resultado. Reintenta el cambio pendiente sin duplicarlo.`);
       return false;
     } finally {
+      mutationPending.current = false;
+      if (confirmed) pendingChange.current = null;
+      if (confirmed && !saved) settlePendingTask(user.id, intent, false);
+      setUncertain(!confirmed);
+      pauseSync(!confirmed);
       setBusy(false);
     }
-  }, [data, load]);
+  }, [data, go, navigationCurrent, refresh, pauseSync, user.id]);
 
   useEffect(() => {
     if (!data || !initialJoinCode || joinedFromLink.current) return;
@@ -426,9 +456,7 @@ export function SprintiaApp({
     void mutate(
       { action: "joinWorkspace", inviteCode: initialJoinCode },
       "Te uniste al equipo correctamente.",
-    ).then((ok) => {
-      if (ok) window.history.replaceState({}, "", "/");
-    });
+    );
   }, [data, initialJoinCode, mutate]);
 
   const activeSprint = data?.sprints.find((sprint) => sprint.id === selectedSprintId) ?? null;
@@ -446,35 +474,31 @@ export function SprintiaApp({
     });
   }, [assigneeFilter, priorityFilter, search, sprintTasks]);
 
-  if (!data && !error) return <LoadingScreen user={user} />;
-
-  if (!data) {
-    return (
-      <main className="fatal-state">
-        <div className="brand-lockup brand-lockup-large"><span className="brand-mark">S</span><span>Sprintia</span></div>
-        <h1>No pudimos abrir tu espacio</h1>
-        <p>{error}</p>
-        <button className="primary-button" onClick={() => void load()}>Intentar de nuevo</button>
-      </main>
-    );
-  }
+  if (navigation.problem) return <NavigationError problem={navigation.problem}
+    onRetry={() => void refresh()} onHome={() => void go({ ...defaultNavigation })}
+    onProject={route.workspace && ["task", "sprint"].includes(navigation.problem) ? () => void go({ ...defaultNavigation, workspace: route.workspace }) : undefined} />;
+  if (!data) return <LoadingScreen user={user} />;
 
   const navigateToView = (nextView: View) => {
-    setView(nextView);
-    setMobileMenu(false);
+    void update({ view: nextView, task: undefined });
   };
 
   const openNewTask = (status: TaskStatus = "todo") => {
+    if (isFinishedSprint(activeSprint)) status = "backlog";
     setSelectedTask({
+      impediment: null, discussionRevision: 0,
+      revision: 0,
       id: "",
       workspaceId: data.workspace.id,
       sprintId: status === "backlog" ? null : selectedSprintId,
       code: "Nueva",
       title: "",
       description: "",
+      acceptanceCriteria: [],
+      checklist: [],
       status,
       priority: "medium",
-      points: 3,
+      points: null,
       assigneeId: user.id,
       assigneeName: user.name,
       assigneeColor: data.members.find((member) => member.id === user.id)?.avatarColor ?? "#6757d9",
@@ -487,26 +511,29 @@ export function SprintiaApp({
   };
 
   const openTask = (task: ScrumTask) => {
-    setSelectedTask(task);
-    setModal("task");
+    void update({ task: task.id });
   };
 
   const moveTask = async (task: ScrumTask, status: TaskStatus) => {
-    if (task.status === status) return;
+    if (task.status === status || mutationPending.current || pendingChange.current) return;
+    pauseSync(true);
     setData((current) => current ? {
       ...current,
       tasks: current.tasks.map((item) => item.id === task.id ? { ...item, status } : item),
     } : current);
     const ok = await mutate(
-      { action: "updateTask", workspaceId: data.workspace.id, id: task.id, status },
+      { action: "updateTask", workspaceId: data.workspace.id, id: task.id, revision: task.revision, status },
       `${task.code} ahora está en ${allStatusLabels[status]}.`,
     );
-    if (!ok) await load(data.workspace.id);
+    if (!ok && navigationCurrent.current.route.workspace === data.workspace.id) {
+      setData((current) => current ? { ...current, tasks: current.tasks.map((item) => item.id === task.id && item.revision === task.revision ? task : item) } : current);
+      await refresh();
+    }
   };
 
   const pageTitle = viewTitles[view];
-  const totalPoints = sprintTasks.reduce((sum, task) => sum + task.points, 0);
-  const donePoints = sprintTasks.filter((task) => task.status === "done").reduce((sum, task) => sum + task.points, 0);
+  const totalPoints = sprintTasks.reduce((sum, task) => sum + (task.points ?? 0), 0);
+  const donePoints = sprintTasks.filter((task) => task.status === "done").reduce((sum, task) => sum + (task.points ?? 0), 0);
   const progress = totalPoints ? Math.round((donePoints / totalPoints) * 100) : 0;
 
   const askAssistant = async (value = assistantInput) => {
@@ -568,253 +595,124 @@ export function SprintiaApp({
     setAssistantMessages((current) => [...current, { role: "assistant", content: `Listo. ${action.label} ya está en tu espacio.` }]);
   };
 
-  const resizeSidebar = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!sidebarResizing || sidebarCollapsed) return;
-    setSidebarWidth(Math.min(360, Math.max(220, event.clientX)));
-  };
-
-  const beginSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (sidebarCollapsed) return;
-    setSidebarResizing(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const endSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    setSidebarResizing(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-
   const toggleAssistant = () => {
-    if (assistantOpen) {
-      if (assistantClosing) return;
-      setAssistantClosing(true);
-      window.setTimeout(() => {
-        setAssistantOpen(false);
-        setAssistantClosing(false);
-      }, 280);
-      return;
+    if (assistantOpen) assistantState.close();
+    else assistantState.open(true);
+  };
+
+  const retryChange = async () => {
+    const intent = pendingChange.current;
+    if (!intent) return;
+    const result = await mutate(intent.payload, intent.message, intent.options);
+    if (result && navigationCurrent.current.route.workspace === (result.workspaceId ?? intent.workspaceId)) {
+      if (result.sprintId) setSelectedSprintId(result.sprintId);
+      // Retry acknowledges the original form, not a second submission.
+      if (modal && modal !== "invite" && !["addTaskComment", "changeImpediment", "saveDailyNote", "saveSprintReview", "addReviewEntry", "convertReviewDecision", "addRetroObservation", "selectRetroProblem", "createRetroAction", "updateRetroAction"].includes(String(intent.payload.action))) closeModal();
     }
-    setAssistantClosing(false);
-    setAssistantOpen(true);
   };
 
   return (
-    <div className={`app-shell${sidebarCollapsed ? " sidebar-is-collapsed" : ""}`} style={{ "--sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px` } as React.CSSProperties}>
-      <aside className={`sidebar${mobileMenu ? " sidebar-open" : ""}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
-        <div className="sidebar-top">
-          <div className="brand-lockup"><span className="brand-mark">S</span><span>Sprintia</span></div>
-          <button className="sidebar-collapse-button" onClick={() => setSidebarCollapsed(true)} aria-label="Ocultar barra lateral" title="Ocultar barra lateral">‹</button>
-          <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú">×</button>
-        </div>
-
-        <div
-          className="sidebar-resizer"
-          role="separator"
-          aria-label="Ajustar ancho de la barra lateral"
-          aria-orientation="vertical"
-          onPointerDown={beginSidebarResize}
-          onPointerMove={resizeSidebar}
-          onPointerUp={endSidebarResize}
-          onPointerCancel={endSidebarResize}
-        />
-
-        <label className="workspace-picker">
-          <span>Espacio de trabajo</span>
-          <select
-            value={data.workspace.id}
-            onChange={(event) => void load(event.target.value)}
-            aria-label="Cambiar espacio de trabajo"
-          >
-            {data.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-          </select>
-        </label>
-
-        <nav className="main-nav" aria-label="Navegación principal">
-          {([
-            ["board", "▦", "Tablero"],
-            ["backlog", "≡", "Backlog"],
-            ["summary", "↗", "Resumen"],
-            ["team", "◉", "Equipo"],
-            ["settings", "⚙", "Configuración"],
-          ] as Array<[View, string, string]>).map(([id, icon, label]) => (
-            <button
-              key={id}
-              className={view === id ? "nav-active" : ""}
-              onClick={() => navigateToView(id)}
-            >
-              <span aria-hidden="true">{icon}</span>{label}
-              {id === "backlog" && <small>{data.tasks.filter((task) => !task.sprintId).length}</small>}
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-project">
-          <span className="sidebar-project-label">Proyecto actual</span>
-          <strong>{data.workspace.name}</strong>
-          <p>{data.members.length} {data.members.length === 1 ? "integrante" : "integrantes"}</p>
-          <button onClick={() => setModal("invite")}>+ Invitar al equipo</button>
-        </div>
-
-        <div className="sidebar-footer">
-          <Avatar member={{ name: user.name, avatarColor: data.members.find((member) => member.id === user.id)?.avatarColor ?? "#6757d9" }} />
-          <span><strong>{user.name}</strong><small>{data.workspace.role === "owner" ? "Propietario" : "Miembro"}</small></span>
-          <form action={signOutAction}>
-            <button className="sidebar-signout" type="submit" aria-label="Cerrar sesión" title="Cerrar sesión">↪</button>
-          </form>
-        </div>
-      </aside>
-
-      {sidebarCollapsed && <button className="sidebar-reopen" onClick={() => setSidebarCollapsed(false)} aria-label="Mostrar barra lateral" title="Mostrar barra lateral">›</button>}
-
-      <main className="main-content">
-        <header className="topbar">
-          <button className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú">☰</button>
-          <div className="page-heading"><span>{pageTitle.eyebrow}</span><h1>{pageTitle.title}</h1></div>
-          {view !== "settings" && (
-            <div className="topbar-actions">
-              <button className="secondary-button hide-mobile" onClick={() => setModal("invite")}>Invitar</button>
-              <button className="primary-button" onClick={() => openNewTask(view === "backlog" ? "backlog" : "todo")}><span>+</span> Nueva tarea</button>
-            </div>
-          )}
-        </header>
-
-        {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>Cerrar</button></div>}
-
-        <div key={view} className={`view-transition view-transition-${view}`}>
-          {view === "board" && (
-            <BoardView
-              sprint={activeSprint}
-              sprints={data.sprints}
-              selectedSprintId={selectedSprintId}
-              onSprintChange={setSelectedSprintId}
-              tasks={filteredTasks}
-              members={data.members}
-              progress={progress}
-              donePoints={donePoints}
-              totalPoints={totalPoints}
-              search={search}
-              onSearch={setSearch}
-              priorityFilter={priorityFilter}
-              onPriorityFilter={setPriorityFilter}
-              assigneeFilter={assigneeFilter}
-              onAssigneeFilter={setAssigneeFilter}
-            onOpenTask={openTask}
-            onMoveTask={moveTask}
-            onNewTask={openNewTask}
-            onNewSprint={() => setModal("sprint")}
-            />
-          )}
-          {view === "backlog" && (
-            <BacklogView
-              tasks={data.tasks.filter((task) => !task.sprintId || task.status === "backlog")}
-              sprint={activeSprint}
-              members={data.members}
-              onOpenTask={openTask}
-              onNewTask={() => openNewTask("backlog")}
-              onAddToSprint={(task) => void mutate(
-                { action: "updateTask", workspaceId: data.workspace.id, id: task.id, sprintId: activeSprint?.id, status: "todo" },
-                `${task.code} se añadió al sprint.`,
-              )}
-            />
-          )}
-          {view === "summary" && (
-            <SummaryView
-              sprint={activeSprint}
-              tasks={sprintTasks}
-              activities={data.activities}
-              progress={progress}
-              totalPoints={totalPoints}
-              donePoints={donePoints}
-              onNewSprint={() => setModal("sprint")}
-            />
-          )}
-          {view === "team" && (
-            <TeamView
-              members={data.members}
-              tasks={sprintTasks}
-              inviteCode={data.workspace.inviteCode}
-              onInvite={() => setModal("invite")}
-            />
-          )}
-          {view === "settings" && (
-            <SettingsView
-              themePreference={themePreference}
-              textSizePreference={textSizePreference}
-              onThemeChange={changeThemePreference}
-              onTextSizeChange={changeTextSizePreference}
-            />
-          )}
-        </div>
-      </main>
-
-      <nav className="mobile-nav" aria-label="Navegación móvil">
-        {([
-          ["board", "▦", "Tablero"],
-          ["backlog", "≡", "Backlog"],
-          ["summary", "↗", "Resumen"],
-          ["team", "◉", "Equipo"],
-          ["settings", "⚙", "Ajustes"],
-        ] as Array<[View, string, string]>).map(([id, icon, label]) => (
-          <button key={id} className={view === id ? "nav-active" : ""} onClick={() => navigateToView(id)}><span aria-hidden="true">{icon}</span>{label}</button>
-        ))}
-      </nav>
-
+    <AppShell
+      user={user} workspace={data.workspace} workspaces={data.workspaces} memberCount={data.members.length}
+      avatarColor={data.members.find((member) => member.id === user.id)?.avatarColor ?? "#2f9c88"}
+      backlogCount={data.tasks.filter((task) => !task.sprintId).length} view={view} title={pageTitle.title} eyebrow={view === "board" ? activeSprint?.status === "planned" ? "Sprint planificado" : activeSprint?.status === "completed" ? "Sprint completado" : activeSprint?.status === "cancelled" ? "Sprint cancelado" : activeSprint ? "Sprint activo" : "Tu equipo" : pageTitle.eyebrow}
+      onNavigate={navigateToView} onWorkspace={(id) => { setError(""); void go({ ...defaultNavigation, workspace: id, view }); }} onInvite={() => { setError(""); setModal("invite"); }}
+      onCreateWorkspace={() => setModal("workspace")} onNewTask={() => openNewTask(view === "backlog" ? "backlog" : "todo")}
+      signOutAction={signOutAction} overlays={<>
+      <DialogLifecycle.Provider value={{ state: modalState, busy, onRetry: uncertain ? () => void retryChange() : undefined, error: error || (navigation.syncFailed ? "No pudimos actualizar el proyecto. Tu borrador se conserva; volveremos a intentarlo." : "") }}>
       {modal === "task" && selectedTask && (
         <TaskModal
-          task={selectedTask}
+          key={`${selectedTask.workspaceId}:${selectedTask.id || "new-task"}`} actorId={user.id} task={selectedTask}
+          latestTask={data.tasks.find((item) => item.id === selectedTask.id) ?? null}
+          acknowledged={confirmedTaskId === selectedTask.id}
           members={data.members}
           sprints={data.sprints}
           busy={busy}
-          onClose={() => { setModal(null); setSelectedTask(null); }}
-          onSave={async (task) => {
+          onClose={closeModal}
+          onCollaborate={async (payload, message, options) => !!(await mutate({ ...payload, workspaceId: data.workspace.id }, message, options))}
+          onReviewSource={(sprintId) => { if (busy) return; closingLinkedTask.current = route.task; modalState.close(() => void update({ view: "review", sprint: sprintId, task: undefined })); }}
+          onCopyLink={async () => {
+            try {
+              await navigator.clipboard.writeText(window.location.href);
+              setToast("Enlace copiado. Solo pueden abrirlo los miembros del proyecto.");
+            } catch { setToast("Puedes copiar el enlace desde la barra de direcciones."); }
+          }}
+          onSave={async (task, patch) => {
             const isNew = !task.id;
             const ok = await mutate(
               {
                 action: isNew ? "createTask" : "updateTask",
-                ...task,
+                ...(isNew ? task : { id: task.id, revision: task.revision, ...patch }),
                 workspaceId: data.workspace.id,
               },
               isNew ? "Tarea creada correctamente." : "Cambios guardados.",
+              { draftKey: taskDraftKey(user.id, task.workspaceId, task.id) },
             );
-            if (ok) { setModal(null); setSelectedTask(null); }
+            if (ok) closeModal();
           }}
-          onDelete={selectedTask.id ? async () => {
+          onDelete={selectedTask.id ? async (revision) => {
             const ok = await mutate(
-              { action: "deleteTask", workspaceId: data.workspace.id, id: selectedTask.id },
+              { action: "deleteTask", workspaceId: data.workspace.id, id: selectedTask.id, revision },
               "Tarea eliminada.",
+              { draftKey: taskDraftKey(user.id, selectedTask.workspaceId, selectedTask.id) },
             );
-            if (ok) { setModal(null); setSelectedTask(null); }
+            if (ok) closeModal();
           } : undefined}
         />
       )}
       {modal === "invite" && (
-        <InviteModal workspaceName={data.workspace.name} inviteCode={data.workspace.inviteCode} onClose={() => setModal(null)} />
+        <InviteModal workspace={data.workspace} onClose={closeModal} onManage={async (operation, invitationRevision) => {
+          const result = await mutate({ action: "manageInvitation", workspaceId: data.workspace.id, operation, invitationRevision }, operation === "revoke" ? "Invitación revocada. El equipo conserva su acceso." : "Nueva invitación generada.");
+          return !!result && !navigationCurrent.current.syncFailed;
+        }} />
+      )}
+      {modal === "scrum" && (
+        <ScrumConfigurationModal workspace={data.workspace} members={data.members} onClose={closeModal} onSave={async (configuration) => {
+          const result = await mutate({ action: "updateScrumConfiguration", workspaceId: data.workspace.id, ...configuration }, "Configuración Scrum guardada para todo el equipo.");
+          if (result) closeModal();
+        }} />
+      )}
+      {modal === "access" && selectedMember && (
+        <MemberAccessModal workspace={data.workspace} member={selectedMember} onClose={closeModal} onSave={async (role, expectedRole, accessRevision) => {
+          const result = await mutate({ action: "updateMemberAccess", workspaceId: data.workspace.id, userId: selectedMember.id, role, expectedRole, accessRevision }, "Acceso actualizado. Las responsabilidades Scrum se conservan.");
+          if (result) closeModal();
+        }} />
       )}
       {modal === "workspace" && (
-        <WorkspaceModal busy={busy} onClose={() => setModal(null)} onSubmit={async (mode, value) => {
+        <WorkspaceModal busy={busy} onClose={closeModal} onSubmit={async (mode, value) => {
           const ok = await mutate(
             mode === "create" ? { action: "createWorkspace", name: value } : { action: "joinWorkspace", inviteCode: value },
             mode === "create" ? "Proyecto creado." : "Te uniste al proyecto.",
           );
-          if (ok) setModal(null);
+          if (ok) closeModal();
         }} />
       )}
-      {modal === "sprint" && (
-        <SprintModal busy={busy} onClose={() => setModal(null)} onSubmit={async (payload) => {
-          const result = await mutate({ action: "createSprint", workspaceId: data.workspace.id, ...payload }, "Sprint creado correctamente.");
+      {(modal === "sprint" || modal === "planSprint") && (
+        <SprintPlanModal key={modal === "planSprint" ? activeSprint?.id : "new-sprint"} sprint={modal === "planSprint" ? activeSprint ?? undefined : undefined} tasks={data.tasks} nextNumber={data.sprints.length + 1} busy={busy} onClose={closeModal} onSave={async (payload) => {
+          const result = await mutate({ action: modal === "sprint" ? "createSprint" : "updateSprint", workspaceId: data.workspace.id, ...payload }, modal === "sprint" ? "Sprint planificado. Selecciona su trabajo antes de iniciarlo." : "Planificación guardada para todo el equipo.");
           if (result) {
             if (result.sprintId) setSelectedSprintId(result.sprintId);
-            setModal(null);
+            closeModal();
           }
         }} />
       )}
+      {modal === "startSprint" && activeSprint && <StartSprintModal sprint={activeSprint} tasks={data.tasks} currentActive={data.sprints.find((sprint) => sprint.status === "active")} busy={busy} onClose={closeModal} onStart={async (revision) => {
+        const result = await mutate({ action: "startSprint", workspaceId: data.workspace.id, id: activeSprint.id, revision }, "Sprint iniciado. El equipo ya puede trabajar en el incremento.");
+        if (result) closeModal();
+      }} />}
+      {(modal === "closeSprint" || modal === "cancelSprint") && activeSprint && <EndSprintModal key={`${modal}:${activeSprint.id}`} sprint={activeSprint} workspace={data.workspace} tasks={data.tasks} cancel={modal === "cancelSprint"} busy={busy} onClose={closeModal} onFinish={async (payload) => {
+        const result = await mutate({ action: modal, workspaceId: data.workspace.id, id: activeSprint.id, ...payload }, modal === "cancelSprint" ? "Sprint cancelado. El motivo y su trabajo quedaron en el historial." : "Sprint cerrado. El trabajo incompleto vuelve al backlog.");
+        if (result) closeModal();
+      }} />}
+      {modal === "sprintHistory" && <SprintHistoryModal sprints={data.sprints} onClose={closeModal} onSelect={(id) => { closeModal(); setSelectedSprintId(id); }} />}
+      </DialogLifecycle.Provider>
 
       {assistantOpen && (
         <AssistantPanel
           messages={assistantMessages}
           input={assistantInput}
           busy={assistantBusy}
-          closing={assistantClosing}
+          state={assistantState}
           onInput={setAssistantInput}
           onSubmit={() => void askAssistant()}
           onPrompt={(prompt) => void askAssistant(prompt)}
@@ -830,10 +728,103 @@ export function SprintiaApp({
       >
         <span aria-hidden="true">✦</span><small>Copiloto</small>
       </button>
-      <button className="workspace-fab" onClick={() => setModal("workspace")} aria-label="Crear o unirse a otro proyecto" title="Cambiar de proyecto">＋</button>
       {toast && <div className="toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
       {busy && <div className="saving-indicator" role="status">Guardando…</div>}
-    </div>
+      </>}
+    >
+        <div className="sync-status" aria-label="Estado de sincronización">
+          <span role="status" aria-live={busy || uncertain || !navigation.online || navigation.syncFailed ? "polite" : "off"}>{busy ? "Guardando…" : uncertain ? "Cambio sin confirmar" : !navigation.online ? "Sin conexión · última copia recibida" : navigation.syncFailed ? "Sincronización pendiente" : navigation.loading ? "Comprobando cambios…" : "Actualizado"}</span>
+          {uncertain ? <button disabled={busy} onClick={() => void retryChange()}>Reintentar cambio pendiente</button>
+            : <button disabled={busy || navigation.loading || !navigation.online} onClick={() => void refresh()} title={navigation.lastSyncedAt ? `Última comprobación: ${new Date(navigation.lastSyncedAt).toLocaleTimeString("es")}` : undefined}>Actualizar</button>}
+        </div>
+        {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>Cerrar</button></div>}
+        {navigation.syncFailed && <div className="error-banner" role="status"><span>No pudimos actualizar. Tus cambios sin guardar se conservan.</span><button onClick={() => void refresh()}>Reintentar sincronización</button></div>}
+
+        <div key={view} className={`view-transition view-transition-${view}`}>
+          {view === "board" && (
+            <BoardView
+              sprint={activeSprint}
+              sprints={data.sprints}
+              selectedSprintId={selectedSprintId}
+              onSprintChange={setSelectedSprintId}
+              tasks={filteredTasks}
+              members={data.members}
+              progress={progress}
+              donePoints={donePoints}
+              totalPoints={totalPoints}
+              search={search}
+              onSearch={(search) => void update({ search }, "replace")}
+              priorityFilter={priorityFilter}
+              onPriorityFilter={(priority) => void update({ priority }, "replace")}
+              assigneeFilter={assigneeFilter}
+              onAssigneeFilter={(assignee) => void update({ assignee }, "replace")}
+            onOpenTask={openTask}
+            onMoveTask={moveTask}
+            onNewTask={openNewTask}
+            onNewSprint={() => setModal("sprint")}
+            onPlanSprint={() => { setError(""); setModal("planSprint"); }}
+            onStartSprint={() => { setError(""); setModal("startSprint"); }}
+            workspace={data.workspace}
+            onCloseSprint={() => { setError(""); setModal("closeSprint"); }}
+            onCancelSprint={() => { setError(""); setModal("cancelSprint"); }}
+            onHistory={() => { setError(""); setModal("sprintHistory"); }}
+            currentTasks={data.tasks}
+            onReview={() => navigateToView("review")}
+            onRetro={() => navigateToView("retro")}
+            onReports={() => navigateToView("reports")}
+            />
+          )}
+          {view === "backlog" && (
+            <BacklogView
+              busy={busy || uncertain}
+              onReorder={async (task, beforeId) => !!(await mutate({ action: "reorderBacklog", workspaceId: data.workspace.id, backlogRevision: data.workspace.backlogRevision, id: task.id, beforeId }, "Orden del backlog guardado."))}
+              tasks={data.tasks.filter((task) => !task.sprintId || task.status === "backlog")}
+              sprint={isFinishedSprint(activeSprint) ? null : activeSprint}
+              members={data.members}
+              onOpenTask={openTask}
+              onNewTask={() => openNewTask("backlog")}
+              onAddToSprint={(task) => void mutate(
+                { action: "updateTask", workspaceId: data.workspace.id, id: task.id, revision: task.revision, sprintId: activeSprint?.id, status: "todo" },
+                `${task.code} se añadió al sprint.`,
+              )}
+            />
+          )}
+          {view === "daily" && <DailyView key={`${data.workspace.id}:${activeSprint?.id ?? "none"}`} actorId={user.id} workspaceId={data.workspace.id} sprint={activeSprint} sprints={data.sprints} tasks={data.tasks} date={route.day ?? localDay()} busy={busy || uncertain} onDate={(day) => void update({ day }, "replace")} onSprint={setSelectedSprintId} onOpenTask={openTask} onMutate={async (payload, message, options) => !!(await mutate({ ...payload, workspaceId: data.workspace.id }, message, options))} />}
+          {view === "review" && <ReviewView key={`${data.workspace.id}:${activeSprint?.id ?? "none"}`} actorId={user.id} workspace={data.workspace} sprint={activeSprint} sprints={data.sprints} tasks={data.tasks} busy={busy} pending={uncertain} error={error} onRetry={uncertain ? () => void retryChange() : undefined} onSprint={setSelectedSprintId} onBoard={() => navigateToView("board")} onSettings={() => navigateToView("settings")} onOpenTask={(taskId) => void update({ task: taskId })} onMutate={async (payload, message, options) => !!(await mutate({ ...payload, workspaceId: data.workspace.id }, message, options))} />}
+          {view === "retro" && <RetroView key={`${data.workspace.id}:${activeSprint?.id ?? "none"}`} actorId={user.id} workspace={data.workspace} sprint={activeSprint} sprints={data.sprints} members={data.members} busy={busy} pending={uncertain} error={error} onRetry={uncertain ? () => void retryChange() : undefined} onSprint={setSelectedSprintId} onBoard={() => navigateToView("board")} onMutate={async (payload, message, options) => !!(await mutate({ ...payload, workspaceId: data.workspace.id }, message, options))} />}
+          {view === "reports" && <ReportsView key={`${data.workspace.id}:${activeSprint?.id ?? "none"}`} workspace={data.workspace} sprint={activeSprint} sprints={data.sprints} busy={busy} syncToken={`${data.sprints.map((s) => `${s.id}:${s.status}:${s.revision}`).join("|")}:${data.workspace.backlogRevision}`} onSprint={setSelectedSprintId} onBoard={() => navigateToView("board")} />}
+          {view === "summary" && activeSprint && <div className="content-pad" style={{ paddingBottom: 0, display: "flex", flexWrap: "wrap", gap: 12 }}><button className="secondary-button" onClick={() => navigateToView("review")}>Review e incremento</button><button className="secondary-button" onClick={() => navigateToView("retro")}>Retrospectiva</button><button className="secondary-button" onClick={() => navigateToView("reports")}>Informes históricos</button></div>}
+          {view === "summary" && isFinishedSprint(activeSprint) && activeSprint ? <div className="content-pad content-narrow"><SprintArchive key={activeSprint.id} sprint={activeSprint} currentTasks={data.tasks} onOpenTask={openTask} /></div> : view === "summary" && (
+            <SummaryView
+              sprint={activeSprint}
+              tasks={sprintTasks}
+              activities={data.activities}
+              progress={progress}
+              totalPoints={totalPoints}
+              donePoints={donePoints}
+              onNewSprint={() => setModal("sprint")}
+            />
+          )}
+          {view === "team" && (
+            <TeamView
+              members={data.members}
+              tasks={sprintTasks}
+              workspace={data.workspace}
+              onInvite={() => { setError(""); setModal("invite"); }}
+              onAccess={(member) => { setError(""); setSelectedMember(member); setModal("access"); }}
+              onScrum={() => { setError(""); setModal("scrum"); }}
+            />
+          )}
+          {view === "settings" && (
+            <><SettingsView
+              themePreference={themePreference}
+              textSizePreference={textSizePreference}
+              onThemeChange={changeThemePreference}
+              onTextSizeChange={changeTextSizePreference}
+            /><ScrumSettings workspace={data.workspace} members={data.members} onEdit={() => { setError(""); setModal("scrum"); }} /><ProjectData key={data.workspace.id} workspace={data.workspace} /></>
+          )}
+        </div>
+    </AppShell>
   );
 }
 
@@ -857,6 +848,16 @@ function BoardView({
   onMoveTask,
   onNewTask,
   onNewSprint,
+  onPlanSprint,
+  onStartSprint,
+  workspace,
+  onCloseSprint,
+  onCancelSprint,
+  onHistory,
+  currentTasks,
+  onReview,
+  onRetro,
+  onReports,
 }: {
   sprint: Sprint | null;
   sprints: Sprint[];
@@ -877,6 +878,16 @@ function BoardView({
   onMoveTask: (task: ScrumTask, status: TaskStatus) => void;
   onNewTask: (status: TaskStatus) => void;
   onNewSprint: () => void;
+  onPlanSprint: () => void;
+  onStartSprint: () => void;
+  workspace: Workspace;
+  onCloseSprint: () => void;
+  onCancelSprint: () => void;
+  onHistory: () => void;
+  currentTasks: ScrumTask[];
+  onReview: () => void;
+  onRetro: () => void;
+  onReports: () => void;
 }) {
   if (!sprint) {
     return <div className="content-pad"><EmptyState title="Todavía no hay un sprint" body="Crea tu primer sprint para comenzar a trabajar." action={<button className="primary-button" onClick={onNewSprint} type="button">+ Crear sprint</button>} /></div>;
@@ -885,42 +896,17 @@ function BoardView({
   const daysLeft = Math.max(0, Math.ceil((new Date(`${sprint.endDate}T23:59:59`).getTime() - APP_NOW) / 86_400_000));
 
   return (
-    <div className="board-page">
-      <section className="sprint-strip">
-        <div className="sprint-main">
-          <label>
-            <span>Sprint</span>
-            <select value={selectedSprintId} onChange={(event) => onSprintChange(event.target.value)}>
-              {sprints.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
-          <div className="sprint-goal"><span>Objetivo</span><strong>{sprint.goal || "Sin objetivo definido"}</strong></div>
-          <button className="sprint-add-button" onClick={onNewSprint} type="button">+ Sprint</button>
-        </div>
-        <div className="sprint-metrics">
-          <div><strong>{daysLeft}</strong><span>días restantes</span></div>
-          <div><strong>{donePoints}<small>/{totalPoints}</small></strong><span>puntos listos</span></div>
-          <div className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><span>{progress}%</span></div>
-        </div>
-      </section>
-
-      <section className="board-toolbar" aria-label="Filtros del tablero">
-        <label className="search-field"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Buscar por título o código…" aria-label="Buscar tareas" /></label>
-        <select value={priorityFilter} onChange={(event) => onPriorityFilter(event.target.value as "all" | TaskPriority)} aria-label="Filtrar por prioridad">
-          <option value="all">Todas las prioridades</option>
-          <option value="urgent">Urgente</option><option value="high">Alta</option><option value="medium">Media</option><option value="low">Baja</option>
-        </select>
-        <select value={assigneeFilter} onChange={(event) => onAssigneeFilter(event.target.value)} aria-label="Filtrar por responsable">
-          <option value="all">Todo el equipo</option><option value="none">Sin asignar</option>
-          {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
-        </select>
-        <span className="result-count">{tasks.length} {tasks.length === 1 ? "tarea" : "tareas"}</span>
-      </section>
+    <div className={boardStyles.board}>
+      <SprintOverview sprint={sprint} sprints={sprints} selectedSprintId={selectedSprintId} onSprintChange={onSprintChange} onNewSprint={onNewSprint} daysLeft={daysLeft} donePoints={donePoints} totalPoints={totalPoints} progress={progress} />
+      <SprintPlanStatus sprint={sprint} currentActive={sprints.find((item) => item.status === "active")} onPlan={onPlanSprint} onStart={onStartSprint} />
+      <SprintLifecycleActions sprint={sprint} workspace={workspace} onClose={onCloseSprint} onCancel={onCancelSprint} onHistory={onHistory} onReview={onReview} onRetro={onRetro} onReports={onReports} />
+      {isFinishedSprint(sprint) ? <SprintArchive key={sprint.id} sprint={sprint} currentTasks={currentTasks} onOpenTask={onOpenTask} /> : <>
+      <BoardToolbar search={search} onSearch={onSearch} priorityFilter={priorityFilter} onPriorityFilter={onPriorityFilter} assigneeFilter={assigneeFilter} onAssigneeFilter={onAssigneeFilter} members={members} count={tasks.length} />
 
       <section className="kanban" aria-label="Tablero Scrum">
         {statusMeta.map((column) => {
           const columnTasks = tasks.filter((task) => task.status === column.id);
-          const points = columnTasks.reduce((sum, task) => sum + task.points, 0);
+          const points = columnTasks.reduce((sum, task) => sum + (task.points ?? 0), 0);
           return (
             <div
               className={`kanban-column column-${column.id}`}
@@ -934,7 +920,7 @@ function BoardView({
             >
               <div className="column-heading">
                 <div><span className="status-dot" /><strong>{column.label}</strong><small>{columnTasks.length}</small></div>
-                <span>{points} pts</span>
+                <span>{points} pts{columnTasks.some((task) => task.points === null) && ` · ${columnTasks.filter((task) => task.points === null).length} sin estimar`}</span>
               </div>
               <p className="column-hint">{column.hint}</p>
               <div className="task-stack">
@@ -948,6 +934,7 @@ function BoardView({
           );
         })}
       </section>
+      </>}
     </div>
   );
 }
@@ -968,55 +955,23 @@ function TaskCard({ task, onOpen, onMove }: { task: ScrumTask; onOpen: () => voi
     >
       <div className="task-card-top"><span>{task.code}</span><span className={`priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span></div>
       <h3>{task.title}</h3>
+      {task.impediment && <span className="blocked-badge" title={`Seguimiento: ${task.impediment.ownerName}`}><span aria-hidden="true">◈</span> Bloqueada</span>}
       {task.description && <p>{task.description}</p>}
       <div className="task-card-footer">
-        <span className="story-points" title={`${task.points} puntos`}>{task.points}</span>
+        <span className="story-points" aria-label={task.points === null ? "Sin estimar" : `${task.points} puntos`} title={task.points === null ? "Sin estimar" : `${task.points} puntos`}>{task.points ?? "—"}</span>
         <select
           value={task.status}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => onMove(event.target.value as TaskStatus)}
           aria-label={`Mover ${task.code}`}
         >
-          {statusMeta.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}
+          {statusMeta.map((status) => <option key={status.id} value={status.id} disabled={status.id === "done" && !!task.impediment}>{status.label}</option>)}
         </select>
         {task.assigneeName ? (
           <Avatar size="small" member={{ name: task.assigneeName, avatarColor: task.assigneeColor ?? "#8791a5" }} />
         ) : <span className="avatar avatar-small avatar-empty" title="Sin asignar">?</span>}
       </div>
     </article>
-  );
-}
-
-function BacklogView({ tasks, sprint, members, onOpenTask, onNewTask, onAddToSprint }: {
-  tasks: ScrumTask[];
-  sprint: Sprint | null;
-  members: Member[];
-  onOpenTask: (task: ScrumTask) => void;
-  onNewTask: () => void;
-  onAddToSprint: (task: ScrumTask) => void;
-}) {
-  const total = tasks.reduce((sum, task) => sum + task.points, 0);
-  return (
-    <div className="content-pad content-narrow">
-      <section className="section-intro">
-        <div><span className="section-kicker">Ideas por priorizar</span><h2>Backlog del producto</h2><p>Ordena las próximas historias y llévalas al sprint cuando estén listas.</p></div>
-        <button className="primary-button" onClick={onNewTask}>+ Añadir al backlog</button>
-      </section>
-      <div className="backlog-summary"><span><strong>{tasks.length}</strong> elementos pendientes</span><span><strong>{total}</strong> puntos estimados</span><span><strong>{members.length}</strong> integrantes disponibles</span></div>
-      <section className="backlog-list">
-        <div className="backlog-list-header"><span>Historia o tarea</span><span>Prioridad</span><span>Puntos</span><span>Responsable</span><span /></div>
-        {tasks.map((task) => (
-          <article className="backlog-row" key={task.id} onClick={() => onOpenTask(task)} tabIndex={0} onKeyDown={(event) => event.key === "Enter" && onOpenTask(task)}>
-            <div><span className="backlog-code">{task.code}</span><strong>{task.title}</strong><small>{task.description || "Sin descripción"}</small></div>
-            <span className={`priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span>
-            <span className="story-points">{task.points}</span>
-            <span>{task.assigneeName ?? "Sin asignar"}</span>
-            <button className="secondary-button small-button" disabled={!sprint} onClick={(event) => { event.stopPropagation(); onAddToSprint(task); }}>Añadir al sprint</button>
-          </article>
-        ))}
-        {tasks.length === 0 && <EmptyState title="Backlog despejado" body="Todas las ideas ya están en un sprint. Añade una nueva cuando surja." action={<button className="secondary-button" onClick={onNewTask}>Crear tarea</button>} />}
-      </section>
-    </div>
   );
 }
 
@@ -1041,7 +996,7 @@ function SummaryView({ sprint, tasks, activities, progress, totalPoints, donePoi
         <button className="secondary-button" onClick={onNewSprint}>+ Nuevo sprint</button>
       </section>
       <section className="metric-grid">
-        <article><span>Progreso</span><strong>{progress}%</strong><div className="mini-progress"><i style={{ width: `${progress}%` }} /></div><small>{donePoints} de {totalPoints} puntos</small></article>
+        <article><span>Progreso</span><strong>{progress}%</strong><div className="mini-progress"><i style={{ width: `${progress}%` }} /></div><small>{donePoints} de {totalPoints} puntos{tasks.some((task) => task.points === null) && ` · ${tasks.filter((task) => task.points === null).length} tareas sin estimar`}</small></article>
         <article><span>Tareas listas</span><strong>{tasks.filter((task) => task.status === "done").length}<small>/{tasks.length}</small></strong><p>del sprint actual</p></article>
         <article><span>Tiempo</span><strong>{elapsed}<small>/{days}</small></strong><p>días transcurridos</p></article>
         <article><span>En revisión</span><strong>{tasks.filter((task) => task.status === "review").length}</strong><p>esperando validación</p></article>
@@ -1069,31 +1024,35 @@ function SummaryView({ sprint, tasks, activities, progress, totalPoints, donePoi
   );
 }
 
-function TeamView({ members, tasks, inviteCode, onInvite }: { members: Member[]; tasks: ScrumTask[]; inviteCode: string; onInvite: () => void }) {
-  const totalPoints = tasks.reduce((sum, task) => sum + task.points, 0);
+function TeamView({ members, tasks, workspace, onInvite, onAccess, onScrum }: { members: Member[]; tasks: ScrumTask[]; workspace: Workspace; onInvite: () => void; onAccess: (member: Member) => void; onScrum: () => void }) {
+  const totalPoints = tasks.reduce((sum, task) => sum + (task.points ?? 0), 0);
   return (
     <div className="content-pad content-narrow">
       <section className="section-intro">
         <div><span className="section-kicker">{members.length} {members.length === 1 ? "persona" : "personas"}</span><h2>Tu equipo Scrum</h2><p>Revisa responsabilidades y distribuye el trabajo del sprint.</p></div>
-        <button className="primary-button" onClick={onInvite}>+ Invitar integrante</button>
+        {canManageProject(workspace.role) && <button className="primary-button" onClick={onInvite}>+ Invitar integrante</button>}
       </section>
       <section className="team-layout">
         <div className="team-list">
           {members.map((member) => {
             const assigned = tasks.filter((task) => task.assigneeId === member.id && task.status !== "done");
-            const points = assigned.reduce((sum, task) => sum + task.points, 0);
+            const points = assigned.reduce((sum, task) => sum + (task.points ?? 0), 0);
             const percentage = totalPoints ? Math.min(100, Math.round((points / totalPoints) * 100 * members.length)) : 0;
             return (
-              <article className="member-card" key={member.id}>
+              <article className="member-card" key={member.id} aria-label={member.name}>
                 <Avatar size="large" member={member} />
-                <div className="member-info"><strong>{member.name}</strong><span>{member.email}</span><small>{member.role === "owner" ? "Propietario · Scrum Master" : "Miembro del equipo"}</small></div>
+                <div className="member-info"><strong>{member.name}</strong><span>{member.email}</span><small>{accessLabels[member.role]}</small>
+                  <div className={governanceStyles.roles}>{member.scrumRoles.length ? member.scrumRoles.map((role) => <span className={governanceStyles.badge} key={role}>{scrumLabels[role]}</span>) : <span>Sin responsabilidad Scrum asignada</span>}</div>
+                  {canManageAccess(workspace.role) && member.role !== "owner" && <button className={`secondary-button ${governanceStyles.accessButton}`} onClick={() => onAccess(member)} aria-label={`Editar acceso de ${member.name}`}>Editar acceso</button>}
+                </div>
                 <div className="member-work"><span><strong>{assigned.length}</strong> tareas activas</span><span><strong>{points}</strong> puntos</span><div className="mini-progress"><i style={{ width: `${percentage}%` }} /></div></div>
               </article>
             );
           })}
         </div>
         <aside className="invite-card">
-          <span className="invite-symbol" aria-hidden="true">＋</span><span>Haz crecer el equipo</span><h3>Invita a tus compañeros</h3><p>Comparte el código para que todos trabajen sobre el mismo tablero.</p><code>{inviteCode}</code><button className="secondary-button" onClick={onInvite}>Compartir invitación</button>
+          <span className="invite-symbol" aria-hidden="true">◇</span><span>Responsabilidades y acceso</span><h3>Un equipo, acuerdos claros</h3><p>Product Owner, Scrum Master y Developers son responsabilidades Scrum; no permisos administrativos.</p>
+          {canManageProject(workspace.role) ? <><button className="secondary-button" onClick={onScrum}>Editar responsabilidades Scrum</button><p>{workspace.inviteEnabled ? "Invitación activa" : "Invitaciones desactivadas"}</p><button className="secondary-button" onClick={onInvite}>Gestionar invitación</button></> : <p>El propietario y los administradores gestionan los acuerdos y las invitaciones. Solo el propietario cambia el acceso.</p>}
         </aside>
       </section>
     </div>
@@ -1209,69 +1168,13 @@ function SettingsView({
   );
 }
 
-function TaskModal({ task, members, sprints, busy, onClose, onSave, onDelete }: {
-  task: ScrumTask;
-  members: Member[];
-  sprints: Sprint[];
-  busy: boolean;
-  onClose: () => void;
-  onSave: (task: ScrumTask) => Promise<void>;
-  onDelete?: () => Promise<void>;
-}) {
-  const [form, setForm] = useState(task);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const update = <K extends keyof ScrumTask>(key: K, value: ScrumTask[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const submit = (event: FormEvent) => { event.preventDefault(); void onSave(form); };
-  return (
-    <ModalShell title={task.id ? task.code : "Nueva tarea"} subtitle={task.id ? "Actualiza la información y guarda los cambios." : "Añade una tarea clara y fácil de completar."} onClose={onClose} wide>
-      <form className="task-form" onSubmit={submit}>
-        <label className="field field-full"><span>Título</span><input autoFocus value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Ej. Preparar encuesta para usuarios" maxLength={160} required /></label>
-        <label className="field field-full"><span>Descripción</span><textarea value={form.description} onChange={(event) => update("description", event.target.value)} placeholder="Añade el contexto y los criterios para considerarla terminada…" rows={5} maxLength={1200} /></label>
-        <label className="field"><span>Estado</span><select value={form.status} onChange={(event) => { const status = event.target.value as TaskStatus; setForm((current) => ({ ...current, status, sprintId: status === "backlog" ? null : current.sprintId })); }}><option value="backlog">Backlog</option>{statusMeta.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}</select></label>
-        <label className="field"><span>Prioridad</span><select value={form.priority} onChange={(event) => update("priority", event.target.value as TaskPriority)}><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></label>
-        <label className="field"><span>Puntos</span><select value={form.points} onChange={(event) => update("points", Number(event.target.value))}>{[1, 2, 3, 5, 8, 13].map((point) => <option key={point} value={point}>{point} {point === 1 ? "punto" : "puntos"}</option>)}</select></label>
-        <label className="field"><span>Responsable</span><select value={form.assigneeId ?? ""} onChange={(event) => update("assigneeId", event.target.value || null)}><option value="">Sin asignar</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-        <label className="field field-full"><span>Sprint</span><select value={form.sprintId ?? ""} onChange={(event) => { const sprintId = event.target.value || null; setForm((current) => ({ ...current, sprintId, status: sprintId ? (current.status === "backlog" ? "todo" : current.status) : "backlog" })); }}><option value="">Backlog del producto</option>{sprints.map((sprint) => <option key={sprint.id} value={sprint.id}>{sprint.name} · {sprint.status === "active" ? "Activo" : sprint.status === "planned" ? "Planeado" : "Finalizado"}</option>)}</select></label>
-        <div className="modal-actions field-full">
-          {onDelete && (confirmDelete ? <span className="delete-confirm">¿Eliminar? <button type="button" onClick={() => void onDelete()} disabled={busy}>Sí, eliminar</button><button type="button" onClick={() => setConfirmDelete(false)}>No</button></span> : <button className="danger-link" type="button" onClick={() => setConfirmDelete(true)}>Eliminar tarea</button>)}
-          <span className="modal-action-spacer" />
-          <button className="secondary-button" type="button" onClick={onClose}>Cancelar</button>
-          <button className="primary-button" type="submit" disabled={busy || !form.title.trim()}>{busy ? "Guardando…" : task.id ? "Guardar cambios" : "Crear tarea"}</button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-}
-
-function InviteModal({ workspaceName, inviteCode, onClose }: { workspaceName: string; inviteCode: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const link = typeof window === "undefined" ? "" : `${window.location.origin}/?join=${inviteCode}`;
-  const copy = async (value: string) => { await navigator.clipboard.writeText(value); setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
-  return (
-    <ModalShell title="Invitar al equipo" subtitle={`Comparte el acceso a “${workspaceName}”.`} onClose={onClose}>
-      <div className="invite-modal-body"><div className="invite-note"><span>i</span><p>Cualquier persona con una cuenta de Google y este enlace podrá unirse como miembro.</p></div><label className="field"><span>Código de invitación</span><div className="copy-field"><code>{inviteCode}</code><button type="button" onClick={() => void copy(inviteCode)}>{copied ? "Copiado" : "Copiar"}</button></div></label><label className="field"><span>Enlace directo</span><div className="copy-field copy-link"><input readOnly value={link} /><button type="button" onClick={() => void copy(link)}>{copied ? "Copiado" : "Copiar"}</button></div></label><div className="modal-actions"><span className="modal-action-spacer" /><button className="primary-button" type="button" onClick={onClose}>Listo</button></div></div>
-    </ModalShell>
-  );
-}
-
 function WorkspaceModal({ busy, onClose, onSubmit }: { busy: boolean; onClose: () => void; onSubmit: (mode: "create" | "join", value: string) => Promise<void> }) {
   const [mode, setMode] = useState<"create" | "join">("create");
   const [value, setValue] = useState("");
   return (
     <ModalShell title="Otro proyecto" subtitle="Crea un espacio nuevo o únete al tablero de tu equipo." onClose={onClose}>
       <div className="segmented"><button className={mode === "create" ? "active" : ""} onClick={() => { setMode("create"); setValue(""); }}>Crear proyecto</button><button className={mode === "join" ? "active" : ""} onClick={() => { setMode("join"); setValue(""); }}>Unirme con código</button></div>
-      <form className="simple-form" onSubmit={(event) => { event.preventDefault(); void onSubmit(mode, value); }}><label className="field"><span>{mode === "create" ? "Nombre del proyecto" : "Código de invitación"}</span><input autoFocus value={value} onChange={(event) => setValue(event.target.value)} placeholder={mode === "create" ? "Ej. Aplicación de tutorías" : "Ej. A1B2C3D4"} maxLength={mode === "create" ? 80 : 20} pattern={mode === "join" ? "[A-Za-z0-9]{8,20}" : undefined} required /></label><div className="modal-actions"><span className="modal-action-spacer" /><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={busy || !value.trim()}>{busy ? "Guardando…" : mode === "create" ? "Crear proyecto" : "Unirme"}</button></div></form>
-    </ModalShell>
-  );
-}
-
-function SprintModal({ busy, onClose, onSubmit }: { busy: boolean; onClose: () => void; onSubmit: (payload: { name: string; goal: string; startDate: string; endDate: string }) => Promise<void> }) {
-  const today = new Date(APP_NOW).toISOString().slice(0, 10);
-  const end = new Date(APP_NOW + 13 * 86_400_000).toISOString().slice(0, 10);
-  const [form, setForm] = useState({ name: "Sprint 2", goal: "", startDate: today, endDate: end });
-  return (
-    <ModalShell title="Crear sprint" subtitle="Define una meta corta y un periodo alcanzable." onClose={onClose}>
-      <form className="simple-form" onSubmit={(event) => { event.preventDefault(); void onSubmit(form); }}><label className="field"><span>Nombre</span><input autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} maxLength={80} required /></label><label className="field"><span>Objetivo</span><textarea value={form.goal} onChange={(event) => setForm({ ...form, goal: event.target.value })} rows={3} placeholder="¿Qué resultado concreto entregará el equipo?" maxLength={300} /></label><div className="form-row"><label className="field"><span>Inicio</span><input type="date" value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} required /></label><label className="field"><span>Fin</span><input type="date" value={form.endDate} min={form.startDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} required /></label></div><div className="modal-actions"><span className="modal-action-spacer" /><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={busy || !form.name.trim()}>{busy ? "Creando…" : "Crear sprint"}</button></div></form>
+      <form className="simple-form" onSubmit={(event) => { event.preventDefault(); void onSubmit(mode, value); }}><label className="field"><span>{mode === "create" ? "Nombre del proyecto" : "Código de invitación"}</span><input data-initial-focus value={value} onChange={(event) => setValue(event.target.value)} placeholder={mode === "create" ? "Ej. Aplicación de tutorías" : "Ej. A1B2C3D4"} maxLength={mode === "create" ? 80 : 20} pattern={mode === "join" ? "[A-Za-z0-9]{8,20}" : undefined} required /></label><div className="modal-actions"><span className="modal-action-spacer" /><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={busy || !value.trim()}>{busy ? "Guardando…" : mode === "create" ? "Crear proyecto" : "Unirme"}</button></div></form>
     </ModalShell>
   );
 }

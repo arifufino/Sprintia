@@ -1,0 +1,2 @@
+/* Exclude dev tooling, not Sprintia UI, from the visual reference. */
+nextjs-portal { display: none !important; }

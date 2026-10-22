@@ -1,0 +1,40 @@
+.collaboration, .daily, .note, .discussion { display: grid; gap: var(--space-5); min-width: 0; font-size: var(--text-sm); }
+.panel, .note { padding: var(--space-5); border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--neu-raised-sm); min-width: 0; }
+.panel p, .discussion p, .daily p, .note p { line-height: 1.65; overflow-wrap: anywhere; margin: 10px 0; }
+.panel > p, .daily > p, .note > p, .discussion > p { color: var(--muted); }
+.panel h3, .heading h3, .daily h2 { margin: 6px 0; font-size: var(--text-lg); line-height: 1.4; overflow-wrap: anywhere; }
+.heading { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; justify-content: space-between; }
+.heading > div { min-width: 0; }
+.kicker { display: block; color: var(--muted); font-size: var(--text-xs); font-weight: 600; }
+.badge { display: inline-flex; gap: 5px; align-items: center; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 10px; background: var(--surface); box-shadow: var(--neu-inset); font-size: var(--text-xs); color: var(--ink); font-weight: 650; }
+.prose { white-space: pre-wrap; }
+.actions, .tabs { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+.tabs { margin: 0 0 var(--space-5); }
+.tabs button[aria-pressed="true"] { box-shadow: var(--neu-inset); border-color: var(--muted); }
+.inline { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); animation: overlay-surface-in var(--motion-enter) var(--motion-ease) both; }
+.inline[data-motion="closing"] { animation: overlay-surface-out var(--motion-exit) var(--motion-ease) both; }
+.fields { min-width: 0; border: 0; padding: 0; margin: 0; display: grid; gap: var(--space-4); }
+.notice { display: grid; gap: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-4); background: var(--surface); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.timeline { display: grid; gap: var(--space-4); list-style: none; margin: 0; padding: 0; }
+.timeline > li { border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-4); background: var(--surface); box-shadow: var(--neu-raised-sm); min-width: 0; overflow-wrap: anywhere; }
+.timeline > li > div:first-child { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; margin-bottom: 12px; }
+.timeline time { font-size: var(--text-xs); color: var(--muted); }
+.timeline p { margin-bottom: 0; }
+.commentForm { display: grid; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.commentForm button { justify-self: start; }
+.collaboration small, .note small { color: var(--muted); font-size: var(--text-xs); }
+.daily { padding: var(--space-6) var(--page-gutter); }
+.dailyIntro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .45fr); gap: var(--space-5); align-items: start; }
+.dailyIntro h2 { margin-top: 8px; }
+.metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+.metrics > div { display: grid; gap: 4px; padding: var(--space-4); box-shadow: var(--neu-inset); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.metrics strong { font-size: var(--text-lg); }
+.metrics span { font-size: var(--text-xs); color: var(--muted); }
+.dailyGrid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+.blockedList { display: grid; gap: var(--space-4); list-style: none; margin: 0; padding: 0; }
+.blockedList button { display: grid; text-align: left; gap: 8px; width: 100%; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); box-shadow: var(--neu-raised-sm); overflow-wrap: anywhere; }
+.blockedList button:hover { border-color: var(--muted); }
+.blockedList span, .blockedList small { color: var(--muted); font-size: var(--text-sm); }
+@container workspace (max-width: 900px) { .dailyGrid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .dailyIntro { grid-template-columns: minmax(0, 1fr); } .metrics { gap: var(--space-2); } .metrics > div { padding: var(--space-2); } .panel, .note { padding: var(--space-4); } .actions button { min-width: 0; flex: 1 1 120px; } }
+@media (prefers-reduced-motion: reduce) { .inline { animation: none !important; } }

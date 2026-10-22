@@ -1,0 +1,24 @@
+/* One motion vocabulary for dialogs, the mobile drawer and Copiloto. */
+:root {
+  --motion-enter: 260ms;
+  --motion-exit: 180ms;
+  --motion-ease: cubic-bezier(.22, 1, .36, 1);
+}
+.modal-backdrop { animation: overlay-fade-in var(--motion-enter) var(--motion-ease) both; }
+.modal-card, .assistant-panel { animation: overlay-surface-in var(--motion-enter) var(--motion-ease) both; }
+.modal-card { transform-origin: 50% 45%; }
+.assistant-panel { transform-origin: bottom right; }
+.modal-backdrop[data-motion="closing"] { animation: overlay-fade-out var(--motion-exit) var(--motion-ease) both; }
+.modal-backdrop[data-motion="closing"] .modal-card,
+.assistant-panel[data-motion="closing"] { animation: overlay-surface-out var(--motion-exit) var(--motion-ease) both; }
+[data-motion="closing"] { pointer-events: none; }
+.dialog-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.dialog-error { padding: 12px; border: 1px solid currentColor; border-radius: var(--radius-sm); color: var(--red); font-size: var(--text-sm); }
+@keyframes overlay-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlay-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes overlay-surface-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes overlay-surface-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(8px) scale(.985); } }
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-enter: 0ms; --motion-exit: 0ms; }
+  [data-motion], [data-motion] * { animation: none !important; transition: none !important; }
+}

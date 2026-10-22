@@ -2,6 +2,12 @@ import type { Metadata, Viewport } from "next";
 import { DM_Sans, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
+import "./styles/tokens.css";
+import "./styles/controls.css";
+import "./styles/responsive-views.css";
+import "./styles/motion.css";
+import "./styles/neumorphism.css";
+import "./styles/chat.css";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -54,7 +60,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#f5f6f8",
+  themeColor: "#242931",
 };
 
 const preferenceBootScript = `

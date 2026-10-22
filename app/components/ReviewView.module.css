@@ -1,0 +1,21 @@
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+.columns > section { min-width: 0; }
+.columns h3 { margin: 6px 0; font-size: var(--text-lg); }
+.columns h4 { margin: var(--space-5) 0 var(--space-3); font-size: var(--text-sm); }
+.columns p { color: var(--muted); }
+.tasks, .links { display: grid; gap: var(--space-4); padding-left: var(--space-5); overflow-wrap: anywhere; }
+.tasks details { display: grid; gap: var(--space-3); }
+.tasks summary { font-weight: 600; }
+.links a { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+.form { display: grid; gap: var(--space-5); min-width: 0; font-size: var(--text-sm); }
+.selection { display: grid; gap: var(--space-4); min-width: 0; margin: 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.selection legend { padding-inline: 8px; font-weight: 650; }
+.selection p { margin: 0; line-height: 1.6; color: var(--muted); }
+.check { display: flex; gap: 12px; align-items: flex-start; line-height: 1.6; min-width: 0; }
+.check input { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 3px; accent-color: var(--ink); }
+.check span { overflow-wrap: anywhere; min-width: 0; }
+.evidence { display: grid; gap: var(--space-3); border-bottom: 1px solid var(--line); padding-bottom: var(--space-4); }
+.reference { display: grid; gap: var(--space-3); margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.reference small, .form small { font-size: var(--text-xs); color: var(--muted); }
+@container workspace (max-width: 950px) { .columns { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .selection { padding: var(--space-3); } }

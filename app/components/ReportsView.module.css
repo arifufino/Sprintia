@@ -1,0 +1,33 @@
+.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); }
+.metric { padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--neu-inset); min-width: 0; }
+.metric span, .metric small { display: block; font-size: var(--text-xs); color: var(--muted); overflow-wrap: anywhere; }
+.metric strong { display: block; margin: var(--space-3) 0; font-size: max(24px, 1.75rem); }
+.legend { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-4) 0; font-size: var(--text-xs); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.swatch { display: inline-block; width: 26px; border-top: 3px solid var(--ink); }
+.pending { border-top-style: dashed; border-color: var(--muted); }
+.scope { border-top-style: dotted; border-color: var(--muted); }
+.chart { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; margin: var(--space-5) 0; }
+.axis { display: flex; flex-direction: column; justify-content: space-between; text-align: right; color: var(--muted); font-size: var(--text-xs); padding-bottom: 32px; }
+.plot { min-width: 0; }
+.plot svg { display: block; width: 100%; height: 240px; overflow: visible; }
+.plot path { fill: none; stroke: var(--ink); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.plot .pendingLine { stroke: var(--muted); stroke-dasharray: 8 6; }
+.plot .scopeLine { stroke: var(--muted); stroke-dasharray: 2 6; opacity: .8; }
+.plot line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.plot circle { fill: var(--ink); }
+.xAxis { display: flex; gap: 12px; justify-content: space-between; font-size: var(--text-xs); color: var(--muted); padding-top: 12px; }
+.table { max-width: 100%; overflow-x: auto; margin-top: var(--space-4); scrollbar-color: var(--muted) var(--surface); }
+.table table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+.table th, .table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--line); vertical-align: top; line-height: 1.5; }
+.table th { font-weight: 650; }
+.trend { list-style: none; padding: 0; margin: var(--space-5) 0 0; display: grid; gap: var(--space-4); }
+.trend > li { padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--neu-inset); min-width: 0; }
+.trend h4 { margin: 0; font-size: var(--text-md); overflow-wrap: anywhere; }
+.trend small { font-size: var(--text-xs); color: var(--muted); }
+.bar { height: 10px; background: var(--line); border-radius: 10px; overflow: hidden; margin: var(--space-3) 0; }
+.bar > span { display: block; height: 100%; background: var(--ink); border-radius: inherit; transition: width var(--motion-enter) var(--motion-ease); }
+.data { font-variant-numeric: tabular-nums; }
+@container workspace (max-width: 850px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .plot svg { height: 190px; } .metrics { gap: var(--space-3); } .metric { padding: var(--space-3); } }
+@media (prefers-reduced-motion: reduce) { .bar > span { transition: none; } }

@@ -1,0 +1,30 @@
+/* One definition per control, shared by navigation, views and dialogs. */
+.primary-button, .secondary-button, .small-button, .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  font-weight: 650;
+  text-align: center;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+.primary-button { border-color: var(--ink); background: var(--ink); color: var(--canvas); }
+.primary-button:hover:not(:disabled) { opacity: .9; }
+.secondary-button:hover:not(:disabled), .small-button:hover:not(:disabled), .icon-button:hover:not(:disabled) { background: var(--brand-soft); border-color: var(--muted); }
+.primary-button:active:not(:disabled), .secondary-button:active:not(:disabled), .small-button:active:not(:disabled), .icon-button:active:not(:disabled) { transform: scale(.98); }
+.icon-button { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: var(--radius-sm); font-size: var(--text-lg); }
+.icon-button svg { flex: 0 0 20px; }
+.small-button { min-height: 36px; padding: 6px 12px; font-size: var(--text-xs); }
+.primary-button:disabled, .secondary-button:disabled, .small-button:disabled, .icon-button:disabled { opacity: .5; }
+@media (prefers-reduced-motion: reduce) {
+  .primary-button, .secondary-button, .small-button, .icon-button { transition: none; }
+}

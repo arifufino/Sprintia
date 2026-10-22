@@ -1,0 +1,28 @@
+# Deployment allowlist: application source only. Local credentials, test
+# identities, recovery archives and preview helpers must never be uploaded.
+/*
+!/app
+!/app/**
+!/db
+!/db/**
+!/lib
+!/lib/**
+!/public
+!/public/**
+!/auth.ts
+!/next.config.ts
+!/package.json
+!/package-lock.json
+!/tsconfig.json
+!/postcss.config.mjs
+!/eslint.config.mjs
+!/.vercelignore
+
+# Local preview marker, never part of the production application.
+/app/_sites-preview
+
+# Also deny secret-bearing files accidentally placed inside an allowed folder.
+**/.env*
+**/*.pem
+**/*.key
+**/*.sprintia-backup

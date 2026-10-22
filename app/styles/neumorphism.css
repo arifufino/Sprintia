@@ -1,0 +1,39 @@
+/* Soft relief is supplementary: borders, labels and visible focus remain. */
+.primary-button, .secondary-button, .small-button, .icon-button,
+.assistant-launcher, .sync-status button { box-shadow: var(--neu-raised-sm); }
+.primary-button:active:not(:disabled), .secondary-button:active:not(:disabled),
+.small-button:active:not(:disabled), .icon-button:active:not(:disabled) { box-shadow: var(--neu-inset); }
+.primary-button:active:not(:disabled) { background: var(--surface); color: var(--ink); }
+.field input, .field textarea, .field select, .task-editor textarea,
+.assistant-form textarea { background: var(--surface); border-color: var(--line); color: var(--ink); box-shadow: var(--neu-inset); }
+.kanban-column, .panel, .metric-grid > article, .member-card,
+.settings-card, .backlog-summary, .invite-card, .empty-state,
+.state-card { background: var(--surface); border-color: var(--line); box-shadow: var(--neu-raised); }
+html[data-theme="dark"] :is(.kanban-column, .panel, .member-card, .settings-card, .backlog-summary, .invite-card, .empty-state),
+html[data-theme="dark"] .metric-grid article { background: var(--surface); border-color: var(--line); box-shadow: var(--neu-raised); }
+html[data-theme="dark"] .field :is(input, textarea, select) { background: var(--surface); color: var(--ink); border-color: var(--line); box-shadow: var(--neu-inset); }
+.kanban-column, html[data-theme="dark"] .kanban-column { padding: 16px; border: 1px solid var(--line); border-radius: 22px; }
+html[data-theme] :is(.column-hint, .add-card-button, .column-empty),
+html[data-theme] .column-heading > span { color: var(--muted); }
+html[data-theme] .column-heading small { background: var(--surface); color: var(--muted); box-shadow: var(--neu-inset); }
+.task-card, html[data-theme="dark"] .task-card {
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+  box-shadow: var(--neu-raised-sm); border-radius: 18px;
+}
+.task-card h3, html[data-theme="dark"] .task-card h3 { color: var(--ink); }
+.task-card:hover, html[data-theme="dark"] .task-card:hover { background: var(--surface); box-shadow: var(--neu-raised); }
+.task-card p, .task-card-top > span:first-child, .task-card-footer select,
+html[data-theme="dark"] .task-card p, html[data-theme="dark"] .task-card-top > span:first-child,
+html[data-theme="dark"] .task-card-footer select { color: var(--muted); }
+.task-card-footer, html[data-theme="dark"] .task-card-footer { border-color: var(--line); }
+.task-card .story-points, html[data-theme="dark"] .task-card .story-points { background: var(--surface); color: var(--ink); box-shadow: var(--neu-inset); }
+.column-empty { box-shadow: var(--neu-inset); color: var(--muted); }
+.modal-card, html[data-theme="dark"] .modal-card { background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow), inset 1px 1px 0 var(--neu-highlight); }
+.assistant-panel, html[data-theme="dark"] .assistant-panel { background: var(--surface); border-color: var(--line); box-shadow: var(--shadow), inset 1px 1px 0 var(--neu-highlight); }
+.assistant-message, .assistant-prompt { box-shadow: var(--neu-raised-sm); }
+.assistant-prompts button { box-shadow: var(--neu-raised-sm); }
+.mini-progress { box-shadow: var(--neu-inset); }
+.blocked-badge { display: inline-flex; gap: 5px; align-items: center; margin: 0 0 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 10px; background: var(--surface); box-shadow: var(--neu-inset); font-size: var(--text-xs); color: var(--ink); font-weight: 650; }
+@media (forced-colors: active) {
+  .task-card, .kanban-column, .primary-button, .secondary-button, .icon-button { box-shadow: none; border: 1px solid ButtonText; }
+}

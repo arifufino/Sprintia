@@ -1,0 +1,82 @@
+/* Shared visual foundation. Text preferences scale type, never page geometry. */
+:root {
+  --ink: #202630;
+  --muted: #596574;
+  --subtle: #697586;
+  --line: #cbd2dc;
+  --surface: #e9edf2;
+  --canvas: #e9edf2;
+  --sidebar: #e9edf2;
+  --brand: #293746;
+  --brand-dark: #182330;
+  --brand-soft: #e8edf2;
+  --green: #2d775b;
+  --green-soft: #e8f7f1;
+  --amber: #93611c;
+  --red: #b23f44;
+  --focus: #6287ae;
+  --shadow: 0 16px 48px rgb(31 39 65 / 12%);
+  --neu-raised: 9px 9px 22px #c8cdd5, -9px -9px 22px #ffffff;
+  --neu-raised-sm: 4px 4px 10px #c8cdd5, -4px -4px 10px #ffffff;
+  --neu-inset: inset 3px 3px 7px #c8cdd5, inset -3px -3px 7px #ffffff;
+  --neu-highlight: rgb(255 255 255 / 65%);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --page-gutter: clamp(16px, 2.5vw, 32px);
+  --text-xs: max(12px, .75rem);
+  --text-sm: max(12px, .875rem);
+  --text-md: max(12px, 1rem);
+  --text-lg: max(12px, 1.25rem);
+}
+
+html[data-theme="dark"] {
+  --ink: #f4f1ec;
+  --muted: #b8c1cc;
+  --subtle: #aab5c2;
+  --line: #3b424d;
+  --surface: #242931;
+  --canvas: #242931;
+  --sidebar: #242931;
+  --brand: #f4f1ec;
+  --brand-dark: #ffffff;
+  --brand-soft: #303742;
+  --green: #bbd68a;
+  --green-soft: #28351f;
+  --amber: #dbbd8c;
+  --red: #e6a2a2;
+  --focus: #bacbdf;
+  --shadow: 0 24px 70px rgb(0 0 0 / 34%);
+  --neu-raised: 9px 9px 22px #171b21, -9px -9px 22px #313943;
+  --neu-raised-sm: 4px 4px 10px #171b21, -4px -4px 10px #313943;
+  --neu-inset: inset 3px 3px 7px #171b21, inset -3px -3px 7px #313943;
+  --neu-highlight: rgb(222 234 251 / 7%);
+}
+
+html { font-size: 16px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html[data-text-size="small"] { font-size: 14px; }
+html[data-text-size="medium"] { font-size: 15px; }
+html[data-text-size="large"] { font-size: 16px; }
+html[data-text-size="xlarge"] { font-size: 18px; }
+body { font-size: var(--text-md); line-height: 1.5; }
+small { font-size: var(--text-xs); }
+:where(button, input, select, textarea) { font-size: var(--text-sm); }
+:where(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
+:where(button, a, input, select, textarea, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; box-shadow: none; }
+
+/* The remaining view-specific selectors keep their established design. */
+.content-pad { min-width: 0; }
+.view-transition { min-width: 0; }
+.task-card h3 { font-size: var(--text-sm); }
+.task-card-top, .task-card-footer { gap: var(--space-2); }
+.task-card-footer select { min-width: 0; flex: 1; }
+.task-card .avatar { flex-shrink: 0; }
+.assistant-form textarea { min-height: 72px; }

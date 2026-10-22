@@ -1,14 +1,10 @@
 "use server";
 
 import { signIn, signOut } from "../auth";
+import { signInDestination } from "./lib/navigation";
 
-function safeJoinCode(value?: string) {
-  return typeof value === "string" && /^[A-Z0-9]{8,20}$/i.test(value) ? value.toUpperCase() : undefined;
-}
-
-export async function signInWithGoogle(joinCode?: string) {
-  const cleanCode = safeJoinCode(joinCode);
-  const redirectTo = cleanCode ? `/?join=${encodeURIComponent(cleanCode)}` : "/";
+export async function signInWithGoogle(destination = "/") {
+  const redirectTo = signInDestination(destination);
   await signIn("google", { redirectTo });
 }
 

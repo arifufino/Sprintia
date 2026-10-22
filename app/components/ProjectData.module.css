@@ -1,0 +1,11 @@
+.section { padding-top: 0; }
+.card { border: 1px solid var(--line); border-radius: 22px; padding: clamp(18px, 3vw, 28px); background: var(--surface); box-shadow: var(--neu-raised); color: var(--ink); overflow-wrap: anywhere; }
+.heading { display: flex; gap: 16px; align-items: center; }
+.heading h2 { margin: 4px 0 0; font-size: var(--text-lg); }
+.icon { flex: 0 0 44px; display: grid; place-items: center; height: 44px; border-radius: 14px; box-shadow: var(--neu-inset); font-size: var(--text-lg); }
+.card p { font-size: var(--text-sm); line-height: 1.6; color: var(--muted); }
+.note { margin: 20px 0; padding: 16px; border-radius: 16px; border: 1px solid var(--line); box-shadow: var(--neu-inset); }
+.note strong { font-size: var(--text-sm); }
+.note p { margin-bottom: 0; }
+.card .error { color: var(--red); }
+.card button { white-space: normal; max-width: 100%; }

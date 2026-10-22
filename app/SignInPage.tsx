@@ -1,15 +1,15 @@
 import { signInWithGoogle } from "./actions";
 
 export function SignInPage({
-  joinCode,
+  returnTo = "/",
   authError,
   isConfigured,
 }: {
-  joinCode?: string;
+  returnTo?: string;
   authError: boolean;
   isConfigured: boolean;
 }) {
-  const signInAction = signInWithGoogle.bind(null, joinCode);
+  const signInAction = signInWithGoogle.bind(null, returnTo);
 
   return (
     <main className="signin-page">

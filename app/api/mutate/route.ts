@@ -1,5 +1,6 @@
 import { getAppUser } from "../../lib/auth";
 import { userFacingMessage, userFacingStatus } from "../../../lib/errors";
+import { logFailure } from "../../../lib/safe-log";
 
 export const dynamic = "force-dynamic";
 
@@ -62,44 +63,11 @@ export async function POST(request: Request) {
       return jsonResponse({ error: "La solicitud no es válida." }, 400);
     }
     const body = parsedBody as MutationBody;
-    let workspaceId: string | undefined;
-    let sprintId: string | undefined;
-    const {
-      createSprint,
-      createTask,
-      createWorkspace,
-      deleteTask,
-      joinWorkspace,
-      updateTask,
-    } = await import("../../../db/runtime");
-
-    switch (body.action) {
-      case "createTask":
-        await createTask(user, body);
-        break;
-      case "updateTask":
-        await updateTask(user, body);
-        break;
-      case "deleteTask":
-        await deleteTask(user, body);
-        break;
-      case "createSprint":
-        sprintId = await createSprint(user, body);
-        break;
-      case "createWorkspace":
-        workspaceId = await createWorkspace(user, body);
-        break;
-      case "joinWorkspace":
-        workspaceId = await joinWorkspace(user, body);
-        break;
-      default:
-        return jsonResponse({ error: "Acción no válida." }, 400);
-    }
-
-    return jsonResponse({ ok: true, workspaceId, sprintId });
+    const { executeMutation } = await import("../../../db/mutations");
+    return jsonResponse(await executeMutation(user, body));
   } catch (error) {
     const status = userFacingStatus(error);
-    if (status === 500) console.error("No pudimos guardar el cambio.", error);
+    if (status === 500) logFailure("mutation.failed", error);
     return jsonResponse(
       { error: userFacingMessage(error, "No pudimos guardar el cambio. Inténtalo de nuevo.") },
       status,

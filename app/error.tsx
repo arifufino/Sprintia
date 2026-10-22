@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
+import { logFailure } from "../lib/safe-log";
 
 export default function ErrorPage({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error(error);
+    logFailure("page.failed");
   }, [error]);
 
   return (
@@ -12,7 +13,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
       <div className="state-card">
         <span className="brand-mark">S</span>
         <h1>Algo no salió como esperábamos</h1>
-        <p>Tu información sigue guardada. Vuelve a intentarlo o regresa en unos minutos.</p>
+        <p>No pudimos cargar esta vista. Vuelve a intentarlo; los cambios que no hayas guardado podrían no haberse conservado.</p>
         <button className="primary-button" onClick={reset}>Intentar de nuevo</button>
       </div>
     </main>
